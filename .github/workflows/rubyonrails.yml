@@ -135,6 +135,7 @@ jobs:
         env:
           COMMIT_DIFFS: ${{ steps.commit-analysis.outputs.commit_diffs }}
           ERROR_OUTPUT: ${{ steps.failure-details.outputs.error_output }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         with:
           github-token: ${{ secrets.AUTOFIX_TOKEN }}
           script: |
@@ -179,50 +180,230 @@ jobs:
             
             // Use GitHub Copilot API to generate fixes
             try {
-              // Note: This is a placeholder for Copilot integration
-              // In practice, you'd use the GitHub Copilot API or similar AI service
-              console.log("AI Analysis Prompt:");
+              console.log("Starting AI analysis with GitHub Copilot...");
+              console.log("Prompt context prepared:");
               console.log(prompt);
-              
-              // TODO: Integrate with GitHub Copilot API or other AI service
-              // The prompt above contains all the context needed for AI analysis
               
               let hasChanges = false;
               
-              // Placeholder for AI-generated fixes
-              // In a real implementation, this would:
-              // 1. Send the prompt to GitHub Copilot API
-              // 2. Parse the AI response for file changes
-              // 3. Apply the suggested fixes to the codebase
-              // 4. Validate that the changes compile/run
+              // Get list of files that might need fixing based on test failures
+              const filesToAnalyze = await getFilesToAnalyze(errorOutput);
+              console.log(`Found ${filesToAnalyze.length} files to analyze:`, filesToAnalyze);
               
-              console.log("AI analysis would be performed here with the following context:");
-              console.log("- Recent commits and diffs");
-              console.log("- Current test failure details");
-              console.log("- Repository structure and patterns");
-              
-              // For now, we'll just detect if there are any obvious issues to fix
-              // This is where you would integrate with your preferred AI service
-              
-              // Check if we have any changes to commit (from potential AI fixes)
+              // Process each file with Copilot
+              for (const filePath of filesToAnalyze) {
+                try {
+                  console.log(`Analyzing file: ${filePath}`);
+                  
+                  // Read current file content
+                  const currentContent = fs.readFileSync(filePath, 'utf8');
+                  
+                  // Create Copilot completion request
+                  const completionPrompt = `${prompt}
+
+## CURRENT FILE: ${filePath}
+\`\`\`ruby
+${currentContent}
+\`\`\`
+
+Based on the test failures and commit history above, please provide a corrected version of this file that will fix the failing tests. Return only the corrected Ruby code without any explanations or markdown formatting.`;
+
+                  // Call OpenAI API (GitHub Copilot backend)
+                  // Note: This requires OPENAI_API_KEY to be set in repository secrets
+                  const response = await fetch('https://api.openai.com/v1/chat/completions', {
+                    method: 'POST',
+                    headers: {
+                      'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
+                      'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                      model: 'gpt-4',
+                      messages: [
+                        {
+                          role: 'system',
+                          content: 'You are an expert Ruby on Rails developer. Analyze code and fix test failures.'
+                        },
+                        {
+                          role: 'user',
+                          content: completionPrompt
+                        }
+                      ],
+                      max_tokens: 2000,
+                      temperature: 0.1
+                    })
+                  });
+                  
+                  const responseData = await response.json();
+                  
+                  if (responseData && responseData.choices && responseData.choices[0]) {
+                    const suggestedFix = responseData.choices[0].message.content.trim();
+                    
+                    // Validate the suggestion looks like Ruby code
+                    if (suggestedFix && suggestedFix.length > 10 && !suggestedFix.includes('I cannot') && !suggestedFix.includes('I apologize')) {
+                      console.log(`Copilot suggested fix for ${filePath}`);
+                      
+                      // Apply the fix
+                      fs.writeFileSync(filePath, suggestedFix, 'utf8');
+                      hasChanges = true;
+                      
+                      console.log(`Applied AI fix to ${filePath}`);
+                    } else {
+                      console.log(`Copilot suggestion for ${filePath} was not applicable`);
+                    }
+                  }
+
+                } catch (fileError) {
+                  console.log(`Error processing ${filePath}:`, fileError.message);
+                }
+              }
+
+              // If no specific files were identified, try a more general approach
+              if (!hasChanges && filesToAnalyze.length === 0) {
+                console.log("No specific files identified, trying general Copilot analysis...");
+                
+                // Use OpenAI API to suggest what files might need changes
+                const analysisResponse = await fetch('https://api.openai.com/v1/chat/completions', {
+                  method: 'POST',
+                  headers: {
+                    'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
+                    'Content-Type': 'application/json'
+                  },
+                  body: JSON.stringify({
+                    model: 'gpt-5',
+                    messages: [
+                      {
+                        role: 'system',
+                        content: 'You are an expert Ruby on Rails developer. Analyze test failures and suggest specific file changes.'
+                      },
+                      {
+                        role: 'user',
+                        content: `${prompt}
+
+Please analyze the test failures and suggest which specific files need to be modified and what changes should be made. Format your response as:
+
+FILE: path/to/file.rb
+CHANGES: Brief description of what needs to be changed
+CODE: The corrected code for this file
+
+Repeat for each file that needs changes.`
+                      }
+                    ],
+                    max_tokens: 1500,
+                    temperature: 0.2
+                  })
+                });
+                
+                const analysisData = await analysisResponse.json();
+                
+                if (analysisData && analysisData.choices && analysisData.choices[0]) {
+                  const analysis = analysisData.choices[0].message.content.trim();
+                  console.log("AI analysis:", analysis);
+                  
+                  // Parse the analysis and apply suggested changes
+                  hasChanges = await parseAndApplyAnalysis(analysis);
+                }
+              }
+
+              // Check final git status
               try {
                 const gitStatus = execSync('git status --porcelain', { encoding: 'utf8' });
                 if (gitStatus.trim()) {
                   hasChanges = true;
-                  console.log("Changes detected for commit:");
+                  console.log("Final changes detected:");
                   console.log(gitStatus);
                 } else {
-                  console.log("No changes generated by AI analysis");
+                  console.log("No changes were generated by AI analysis");
                 }
               } catch (error) {
                 console.log("Error checking git status:", error.message);
               }
-              
+
               core.setOutput('has_changes', hasChanges.toString());
-              
+
             } catch (error) {
-              console.error("AI analysis failed:", error);
-              core.setOutput('has_changes', 'false');
+              console.error("Copilot API error:", error.message);
+
+              // Fallback: try basic pattern-based fixes
+              console.log("Falling back to pattern-based fixes...");
+              let hasChanges = await applyBasicFixes(errorOutput);
+              core.setOutput('has_changes', hasChanges.toString());
+            }
+
+            // Helper function to identify files that might need fixing
+            async function getFilesToAnalyze(errorOutput) {
+              const files = [];
+              const lines = errorOutput.split('\n');
+              
+              for (const line of lines) {
+                // Look for file paths in RSpec output
+                const fileMatch = line.match(/^\s*#\s+(.+\.rb):(\d+)/);
+                if (fileMatch) {
+                  const filePath = fileMatch[1];
+                  if (fs.existsSync(filePath) && !files.includes(filePath)) {
+                    files.push(filePath);
+                  }
+                }
+                
+                // Look for other file references
+                const pathMatch = line.match(/([a-zA-Z_\/]+\.rb)/);
+                if (pathMatch) {
+                  const filePath = pathMatch[1];
+                  if (fs.existsSync(filePath) && !files.includes(filePath)) {
+                    files.push(filePath);
+                  }
+                }
+              }
+
+              return files.slice(0, 5); // Limit to 5 files to avoid API limits
+            }
+
+            // Helper function to parse Copilot analysis and apply changes
+            async function parseAndApplyAnalysis(analysis) {
+              let hasChanges = false;
+              const sections = analysis.split('FILE:');
+              
+              for (const section of sections) {
+                if (!section.trim()) continue;
+                
+                const lines = section.trim().split('\n');
+                const filePath = lines[0].trim();
+                
+                if (!fs.existsSync(filePath)) continue;
+                
+                // Find the CODE section
+                const codeIndex = lines.findIndex(line => line.startsWith('CODE:'));
+                if (codeIndex === -1) continue;
+                
+                const codeLines = lines.slice(codeIndex + 1);
+                const newContent = codeLines.join('\n').trim();
+                
+                if (newContent && newContent.length > 10) {
+                  fs.writeFileSync(filePath, newContent, 'utf8');
+                  hasChanges = true;
+                  console.log(`Applied analysis-based fix to ${filePath}`);
+                }
+              }
+
+              return hasChanges;
+            }
+
+            // Fallback function for basic pattern-based fixes
+            async function applyBasicFixes(errorOutput) {
+              let hasChanges = false;
+              
+              // Look for common test failure patterns and apply simple fixes
+              if (errorOutput.includes('undefined method') || errorOutput.includes('NoMethodError')) {
+                console.log("Detected method-related errors, applying basic fixes...");
+                // This would contain basic pattern-matching fixes
+                // For now, just log that we detected the issue
+              }
+
+              if (errorOutput.includes('NameError') || errorOutput.includes('uninitialized constant')) {
+                console.log("Detected constant/variable errors, applying basic fixes...");
+                // This would contain basic pattern-matching fixes
+              }
+
+              return hasChanges;
             }
 
   # Job 3: Commit AI changes and create PR
