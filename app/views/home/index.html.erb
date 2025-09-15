@@ -1,0 +1,83 @@
+<div class="container">
+  <div class="hero-section">
+    <h1 class="main-title">Welcome to SpecFixer</h1>
+    <p class="subtitle">Your daily dose of inspiration and wisdom</p>
+  </div>
+
+  <div class="quote-section">
+    <h2 class="section-title">Quote of the Day</h2>
+    <div id="quote-container">
+      <%= render 'quote_card', quote: @quote_of_the_day %>
+    </div>
+    
+    <div class="quote-actions">
+      <%= button_to "Get New Quote", refresh_quote_path, 
+          method: :get, 
+          remote: true, 
+          class: "btn btn-primary refresh-btn",
+          id: "refresh-quote-btn" %>
+    </div>
+  </div>
+
+  <div class="features-section">
+    <h2 class="section-title">Features</h2>
+    <div class="features-grid">
+      <div class="feature-card">
+        <h3>Daily Inspiration</h3>
+        <p>Get a new inspiring quote every day to motivate your journey.</p>
+      </div>
+      <div class="feature-card">
+        <h3>Random Quotes</h3>
+        <p>Click the refresh button to discover new quotes anytime.</p>
+      </div>
+      <div class="feature-card">
+        <h3>Curated Collection</h3>
+        <p>Our quotes are carefully selected from various categories and authors.</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+  const refreshBtn = document.getElementById('refresh-quote-btn');
+  const quoteContainer = document.getElementById('quote-container');
+  
+  if (refreshBtn) {
+    refreshBtn.addEventListener('click', function(e) {
+      e.preventDefault();
+      
+      // Add loading state
+      refreshBtn.disabled = true;
+      refreshBtn.textContent = 'Loading...';
+      
+      fetch('<%= refresh_quote_path %>', {
+        method: 'GET',
+        headers: {
+          'Accept': 'text/html',
+          'X-Requested-With': 'XMLHttpRequest'
+        }
+      })
+      .then(response => response.text())
+      .then(html => {
+        quoteContainer.innerHTML = html;
+        
+        // Reset button state
+        refreshBtn.disabled = false;
+        refreshBtn.textContent = 'Get New Quote';
+        
+        // Add animation class
+        quoteContainer.classList.add('quote-updated');
+        setTimeout(() => {
+          quoteContainer.classList.remove('quote-updated');
+        }, 500);
+      })
+      .catch(error => {
+        console.error('Error:', error);
+        refreshBtn.disabled = false;
+        refreshBtn.textContent = 'Get New Quote';
+      });
+    });
+  }
+});
+</script>
