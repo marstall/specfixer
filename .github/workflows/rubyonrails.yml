@@ -270,15 +270,7 @@ jobs:
                       },
                       {
                         role: 'user',
-                        content: `${prompt}
-
-Please analyze the test failures and suggest which specific files need to be modified and what changes should be made. Format your response as:
-
-FILE: path/to/file.rb
-CHANGES: Brief description of what needs to be changed
-CODE: The corrected code for this file
-
-Repeat for each file that needs changes.`
+                        content: prompt + '\n\nPlease analyze the test failures and suggest which specific files need to be modified and what changes should be made. Format your response as:\n\nFILE: path/to/file.rb\nCHANGES: Brief description of what needs to be changed\nCODE: The corrected code for this file\n\nRepeat for each file that needs changes.'
                       }
                     ],
                     max_tokens: 1500,
