@@ -226,23 +226,37 @@ jobs:
                     })
                   });
                   
+                  if (!response.ok) {
+                    console.log(`OpenAI API error: ${response.status} ${response.statusText}`);
+                    const errorText = await response.text();
+                    console.log(`Error details: ${errorText}`);
+                    continue;
+                  }
+                  
                   const responseData = await response.json();
+                  console.log(`OpenAI API response status: ${response.status}`);
+                  console.log(`Response data keys: ${Object.keys(responseData)}`);
                   
                   if (responseData && responseData.choices && responseData.choices[0]) {
                     const suggestedFix = responseData.choices[0].message.content.trim();
+                    console.log(`AI suggested fix length: ${suggestedFix.length} characters`);
+                    console.log(`AI suggestion preview: ${suggestedFix.substring(0, 200)}...`);
                     
                     // Validate the suggestion looks like Ruby code
                     if (suggestedFix && suggestedFix.length > 10 && !suggestedFix.includes('I cannot') && !suggestedFix.includes('I apologize')) {
-                      console.log(`Copilot suggested fix for ${filePath}`);
+                      console.log(`Applying AI suggested fix for ${filePath}`);
                       
                       // Apply the fix
                       fs.writeFileSync(filePath, suggestedFix, 'utf8');
                       hasChanges = true;
                       
-                      console.log(`Applied AI fix to ${filePath}`);
+                      console.log(`Successfully applied AI fix to ${filePath}`);
                     } else {
-                      console.log(`Copilot suggestion for ${filePath} was not applicable`);
+                      console.log(`AI suggestion for ${filePath} was not applicable or too short`);
                     }
+                  } else {
+                    console.log(`No valid AI response received for ${filePath}`);
+                    console.log(`Response structure: ${JSON.stringify(responseData, null, 2)}`);
                   }
 
                 } catch (fileError) {
@@ -262,7 +276,7 @@ jobs:
                     'Content-Type': 'application/json'
                   },
                   body: JSON.stringify({
-                    model: 'gpt-5',
+                    model: 'gpt-4',
                     messages: [
                       {
                         role: 'system',
