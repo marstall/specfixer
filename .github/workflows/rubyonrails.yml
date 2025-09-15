@@ -39,6 +39,46 @@ jobs:
       # Add or replace test runners here
       - name: Run tests
         run: bin/rake
+      
+      # Send email notification on failure
+      - name: Send email notification on failure
+        if: failure()
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 587
+          username: ${{ secrets.EMAIL_USERNAME }}
+          password: ${{ secrets.EMAIL_PASSWORD }}
+          subject: "🚨 Rails CI Failed - bin/rake error in ${{ github.repository }}"
+          to: marstall@gmail.com
+          from: ${{ secrets.EMAIL_USERNAME }}
+          body: |
+            Hi there!
+            
+            The Rails CI workflow failed in repository: ${{ github.repository }}
+            
+            **Failure Details:**
+            - Branch: ${{ github.ref_name }}
+            - Commit: ${{ github.sha }}
+            - Workflow: ${{ github.workflow }}
+            - Job: ${{ github.job }}
+            - Run ID: ${{ github.run_id }}
+            
+            **What failed:**
+            The `bin/rake` command encountered an error during the test execution.
+            
+            **Next Steps:**
+            1. Check the workflow logs: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+            2. Review the failing tests or rake tasks
+            3. Fix the issues and push a new commit
+            
+            **Commit Message:**
+            ${{ github.event.head_commit.message }}
+            
+            **Author:** ${{ github.event.head_commit.author.name }}
+            
+            Best regards,
+            GitHub Actions Bot 🤖
 
   lint:
     runs-on: ubuntu-latest
@@ -58,3 +98,47 @@ jobs:
         run: bin/brakeman -q -w2
       - name: Lint Ruby files
         run: bin/rubocop --parallel
+      
+      # Send email notification on lint failure
+      - name: Send email notification on lint failure
+        if: failure()
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 587
+          username: ${{ secrets.EMAIL_USERNAME }}
+          password: ${{ secrets.EMAIL_PASSWORD }}
+          subject: "🚨 Rails Lint Failed - Code quality issues in ${{ github.repository }}"
+          to: marstall@gmail.com
+          from: ${{ secrets.EMAIL_USERNAME }}
+          body: |
+            Hi there!
+            
+            The Rails lint workflow failed in repository: ${{ github.repository }}
+            
+            **Failure Details:**
+            - Branch: ${{ github.ref_name }}
+            - Commit: ${{ github.sha }}
+            - Workflow: ${{ github.workflow }}
+            - Job: ${{ github.job }}
+            - Run ID: ${{ github.run_id }}
+            
+            **What failed:**
+            One or more of the following checks failed:
+            - Security audit (bundler-audit)
+            - Security scan (brakeman)
+            - Ruby linting (rubocop)
+            
+            **Next Steps:**
+            1. Check the workflow logs: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+            2. Fix the security vulnerabilities or code style issues
+            3. Run the checks locally: `bin/bundler-audit --update && bin/brakeman && bin/rubocop`
+            4. Push a new commit with fixes
+            
+            **Commit Message:**
+            ${{ github.event.head_commit.message }}
+            
+            **Author:** ${{ github.event.head_commit.author.name }}
+            
+            Best regards,
+            GitHub Actions Bot 🤖
