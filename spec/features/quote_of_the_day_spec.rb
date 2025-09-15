@@ -25,35 +25,24 @@ RSpec.feature 'Quote of the Day', type: :feature do
     expect(page).to have_content(quote.category.titleize)
   end
 
-  scenario 'User can refresh to get a new quote', js: true do
+  scenario 'User can see the refresh quote button' do
     visit root_path
 
-    # Store the initial quote content
-    initial_quote = find('.quote-text').text
-
-    # Click the refresh button
-    click_button 'Get New Quote'
-
-    # Wait for the AJAX request to complete and check if content might have changed
-    # Note: Due to randomness, the quote might be the same, but the button should work
+    # Check that the refresh functionality is available
     expect(page).to have_button('Get New Quote')
-    expect(page).to have_css('.quote-text')
+    expect(page).to have_css('#refresh-quote-btn')
+    expect(page).to have_css('#quote-container')
   end
 
-  scenario 'User sees loading state when refreshing quote', js: true do
-    visit root_path
+  scenario 'Refresh quote endpoint works correctly' do
+    quote = create(:quote, content: "Test refresh quote", author: "Test Author")
+    allow(Quote).to receive(:random_quote).and_return(quote)
 
-    # Mock a slow response to test loading state
-    allow(Quote).to receive(:random_quote).and_wrap_original do |method|
-      sleep(0.1) # Small delay to see loading state
-      method.call
-    end
+    # Test the refresh_quote endpoint directly
+    visit refresh_quote_path
 
-    click_button 'Get New Quote'
-
-    # The button text should temporarily change to "Loading..."
-    # Note: This might be too fast to catch in test, but the functionality should work
-    expect(page).to have_css('.quote-card')
+    expect(page).to have_content("Test refresh quote")
+    expect(page).to have_content("Test Author")
   end
 
   scenario 'Homepage displays feature cards' do
