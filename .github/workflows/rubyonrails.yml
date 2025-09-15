@@ -139,18 +139,20 @@ jobs:
             const { execSync } = require('child_process');
             
             // Construct comprehensive prompt for AI
-            const prompt = `
-            You are an expert Ruby on Rails developer tasked with fixing test failures in a CI/CD pipeline.
+            const commitDiffs = `${{ steps.commit-analysis.outputs.commit_diffs }}`;
+            const errorOutput = `${{ steps.failure-details.outputs.error_output }}`;
+            
+            const prompt = `You are an expert Ruby on Rails developer tasked with fixing test failures in a CI/CD pipeline.
             
             ## FAILURE CONTEXT
             Failure Type: Test failures
             Repository: Rails application with RSpec test suite
             
             ## RECENT COMMITS (that may have introduced the issue)
-            ${{ steps.commit-analysis.outputs.commit_diffs }}
+            ${commitDiffs}
             
             ## CURRENT TEST FAILURES
-            ${{ steps.failure-details.outputs.error_output }}
+            ${errorOutput}
             
             ## YOUR TASK
             Analyze the test failures and recent commits to identify the root cause.
@@ -167,8 +169,7 @@ jobs:
             2. Complete corrected file content
             3. Brief explanation of changes made
             
-            Please provide practical, working solutions that will make all tests pass.
-            `;
+            Please provide practical, working solutions that will make all tests pass.`;
             
             // Use GitHub Copilot API to generate fixes
             try {
