@@ -199,13 +199,7 @@ jobs:
                   const currentContent = fs.readFileSync(filePath, 'utf8');
                   
                   // Create Copilot completion request
-                  const completionPrompt = `${prompt}
-
-## CURRENT FILE: ${filePath}
-` + '```ruby\n' + `${currentContent}
-` + '```' + `
-
-Based on the test failures and commit history above, please provide a corrected version of this file that will fix the failing tests. Return only the corrected Ruby code without any explanations or markdown formatting.`;
+                  const completionPrompt = prompt + '\n\n## CURRENT FILE: ' + filePath + '\n```ruby\n' + currentContent + '\n```\n\nBased on the test failures and commit history above, please provide a corrected version of this file that will fix the failing tests. Return only the corrected Ruby code without any explanations or markdown formatting.';
 
                   // Call OpenAI API (GitHub Copilot backend)
                   // Note: This requires OPENAI_API_KEY to be set in repository secrets
