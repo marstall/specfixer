@@ -10,6 +10,12 @@ on:
     branches: [ "main" ]
   pull_request:
     branches: [ "main" ]
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -55,3 +61,130 @@ jobs:
       - name: Log lint failure message
         if: failure()
         run: echo "linting failed! oh my."
+
+  # Autofix job that runs when test or lint jobs fail
+  autofix:
+    runs-on: ubuntu-latest
+    needs: [test, lint]
+    if: failure()
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Git
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Get failure details
+        id: failure-info
+        run: |
+          # Create a timestamp for unique branch naming
+          TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+          BRANCH_NAME="autofix/ci-failure-${TIMESTAMP}"
+          
+          # Determine failure type and create appropriate title
+          if [[ "${{ needs.test.result }}" == "failure" ]]; then
+            FAILURE_TYPE="Test failures detected"
+            TITLE="Autofix: Test failures detected in CI pipeline"
+          elif [[ "${{ needs.lint.result }}" == "failure" ]]; then
+            FAILURE_TYPE="Linting failures detected"
+            TITLE="Autofix: Linting failures detected in CI pipeline"
+          else
+            FAILURE_TYPE="CI pipeline failures detected"
+            TITLE="Autofix: CI pipeline failures detected"
+          fi
+          
+          echo "branch_name=${BRANCH_NAME}" >> $GITHUB_OUTPUT
+          echo "failure_type=${FAILURE_TYPE}" >> $GITHUB_OUTPUT
+          echo "pr_title=${TITLE}" >> $GITHUB_OUTPUT
+
+      - name: Create autofix branch
+        run: |
+          git checkout -b ${{ steps.failure-info.outputs.branch_name }}
+          git push origin ${{ steps.failure-info.outputs.branch_name }}
+
+      - name: Create PR with failure details
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const { data: workflow_run } = await github.rest.actions.getWorkflowRun({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              run_id: context.runId
+            });
+            
+            const { data: jobs } = await github.rest.actions.listJobsForWorkflowRun({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              run_id: context.runId
+            });
+            
+            let errorDetails = `## CI Pipeline Failure Report\n\n`;
+            errorDetails += `**Workflow Run:** [${workflow_run.display_title}](${workflow_run.html_url})\n`;
+            errorDetails += `**Commit:** ${context.sha.substring(0, 7)}\n`;
+            errorDetails += `**Branch:** ${context.ref.replace('refs/heads/', '')}\n`;
+            errorDetails += `**Triggered by:** ${workflow_run.triggering_actor.login}\n`;
+            errorDetails += `**Run ID:** ${context.runId}\n\n`;
+            
+            errorDetails += `### Failed Jobs:\n\n`;
+            
+            for (const job of jobs.jobs) {
+              if (job.conclusion === 'failure') {
+                errorDetails += `#### ${job.name}\n`;
+                errorDetails += `- **Status:** ${job.conclusion}\n`;
+                errorDetails += `- **Started:** ${job.started_at}\n`;
+                errorDetails += `- **Completed:** ${job.completed_at}\n`;
+                errorDetails += `- **Log URL:** [View logs](${job.html_url})\n\n`;
+                
+                // Get job logs for more details
+                try {
+                  const { data: logs } = await github.rest.actions.downloadJobLogsForWorkflowRun({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    job_id: job.id
+                  });
+                  
+                  if (logs) {
+                    errorDetails += `**Error Details:**\n\`\`\`\n`;
+                    // Extract last 50 lines of logs for brevity
+                    const logLines = logs.split('\n').slice(-50);
+                    errorDetails += logLines.join('\n');
+                    errorDetails += `\n\`\`\`\n\n`;
+                  }
+                } catch (error) {
+                  errorDetails += `*Could not retrieve detailed logs: ${error.message}*\n\n`;
+                }
+              }
+            }
+            
+            errorDetails += `### Next Steps\n\n`;
+            errorDetails += `This PR was automatically created to track the CI failure. Please:\n\n`;
+            errorDetails += `1. Review the error details above\n`;
+            errorDetails += `2. Fix the identified issues\n`;
+            errorDetails += `3. Push fixes to this branch\n`;
+            errorDetails += `4. Merge this PR once all issues are resolved\n\n`;
+            errorDetails += `*This autofix PR was generated automatically by GitHub Actions.*`;
+            
+            const { data: pr } = await github.rest.pulls.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: '${{ steps.failure-info.outputs.pr_title }}',
+              head: '${{ steps.failure-info.outputs.branch_name }}',
+              base: 'main',
+              body: errorDetails
+            });
+            
+            console.log(`Created autofix PR: ${pr.html_url}`);
+            
+            // Add labels to the PR
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: pr.number,
+              labels: ['autofix', 'ci-failure', 'needs-attention']
+            });
