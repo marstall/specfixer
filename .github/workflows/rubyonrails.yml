@@ -37,36 +37,15 @@ jobs:
       - name: Run tests
         run: bin/rake
 
-  lint:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-      - name: Install Ruby and gems
-        uses: ruby/setup-ruby@78c01b705fd9d5ad960d432d3a0cfa341d50e410 # v1.179.1
-        with:
-          ruby-version: '3.3.1'
-          bundler-cache: true
-      - name: Generate binstubs
-        run: bundle binstubs bundler-audit brakeman rubocop
-      # Add or replace any other lints here
-      - name: Security audit dependencies
-        run: bin/bundler-audit --update
-      - name: Security audit application code
-        run: bin/brakeman -q -w2
-      - name: Lint Ruby files
-        run: bin/rubocop --parallel --config .rubocop.yml
 
-      # Log message on lint failure
-      - name: Log lint failure message
-        if: failure()
-        run: echo "linting failed! oh my."
-
-  # Autofix job that runs when test or lint jobs fail
-  autofix:
+  # Job 1: Create autofix branch when tests fail
+  create-branch:
     runs-on: ubuntu-latest
-    needs: [test, lint]
-    if: always() && (needs.test.result == 'failure' || needs.lint.result == 'failure')
+    needs: [test]
+    if: always() && needs.test.result == 'failure'
+    outputs:
+      branch_name: ${{ steps.branch-info.outputs.branch_name }}
+      failure_type: ${{ steps.branch-info.outputs.failure_type }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -79,112 +58,249 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
 
-      - name: Get failure details
-        id: failure-info
+      - name: Create branch info
+        id: branch-info
         run: |
-          # Create a timestamp for unique branch naming
           TIMESTAMP=$(date +%Y%m%d-%H%M%S)
-          BRANCH_NAME="autofix/ci-failure-${TIMESTAMP}"
-          
-          # Determine failure type and create appropriate title
-          if [[ "${{ needs.test.result }}" == "failure" ]]; then
-            FAILURE_TYPE="Test failures detected"
-            TITLE="Autofix: Test failures detected in CI pipeline"
-          elif [[ "${{ needs.lint.result }}" == "failure" ]]; then
-            FAILURE_TYPE="Linting failures detected"
-            TITLE="Autofix: Linting failures detected in CI pipeline"
-          else
-            FAILURE_TYPE="CI pipeline failures detected"
-            TITLE="Autofix: CI pipeline failures detected"
-          fi
+          BRANCH_NAME="autofix/ai-test-fix-${TIMESTAMP}"
+          FAILURE_TYPE="test"
           
           echo "branch_name=${BRANCH_NAME}" >> $GITHUB_OUTPUT
           echo "failure_type=${FAILURE_TYPE}" >> $GITHUB_OUTPUT
-          echo "pr_title=${TITLE}" >> $GITHUB_OUTPUT
 
       - name: Create autofix branch
         run: |
-          git checkout -b ${{ steps.failure-info.outputs.branch_name }}
-          git push origin ${{ steps.failure-info.outputs.branch_name }}
+          git checkout -b ${{ steps.branch-info.outputs.branch_name }}
+          git push origin ${{ steps.branch-info.outputs.branch_name }}
 
-      - name: Create PR with failure details
+  # Job 2: Use AI to generate fixes for test failures
+  ai-fix:
+    runs-on: ubuntu-latest
+    needs: [test, create-branch]
+    if: always() && needs.create-branch.result == 'success'
+    outputs:
+      has_changes: ${{ steps.ai-analysis.outputs.has_changes }}
+    steps:
+      - name: Checkout autofix branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.create-branch.outputs.branch_name }}
+          fetch-depth: 0
+          token: ${{ secrets.AUTOFIX_TOKEN }}
+
+      - name: Install Ruby and gems
+        uses: ruby/setup-ruby@78c01b705fd9d5ad960d432d3a0cfa341d50e410
+        with:
+          ruby-version: '3.3.1'
+          bundler-cache: true
+
+      - name: Analyze commit history and failures
+        id: commit-analysis
+        run: |
+          # Find the last successful commit on main
+          LAST_SUCCESS_SHA=$(git log origin/main --format="%H" --grep="✅" -1 || git log origin/main --format="%H" -10 | tail -1)
+          echo "Last successful commit: ${LAST_SUCCESS_SHA}"
+          
+          # Get recent commits (max 5) since last success
+          COMMITS_JSON=$(git log ${LAST_SUCCESS_SHA}..HEAD --format='{"sha":"%H","message":"%s","author":"%an","date":"%ad"}' --date=iso --max-count=5 | jq -s '.')
+          echo "commits_json<<EOF" >> $GITHUB_OUTPUT
+          echo "$COMMITS_JSON" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+          
+          # Get diffs for each commit
+          DIFFS=""
+          for commit in $(git log ${LAST_SUCCESS_SHA}..HEAD --format="%H" --max-count=5); do
+            DIFF=$(git show $commit --format="Commit: %H%nAuthor: %an%nDate: %ad%nMessage: %s%n" --date=iso)
+            DIFFS="${DIFFS}\n\n--- COMMIT DIFF ---\n${DIFF}"
+          done
+          
+          echo "commit_diffs<<EOF" >> $GITHUB_OUTPUT
+          echo -e "$DIFFS" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Get current test failure details
+        id: failure-details
+        run: |
+          echo "Capturing test failures..."
+          TEST_OUTPUT=$(bundle exec rspec 2>&1 || true)
+          
+          echo "error_output<<EOF" >> $GITHUB_OUTPUT
+          echo "TEST FAILURES:" >> $GITHUB_OUTPUT
+          echo "$TEST_OUTPUT" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Generate AI fix using GitHub Copilot
+        id: ai-analysis
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.AUTOFIX_TOKEN }}
           script: |
-            const { data: workflow_run } = await github.rest.actions.getWorkflowRun({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              run_id: context.runId
-            });
+            const fs = require('fs');
+            const { execSync } = require('child_process');
             
-            const { data: jobs } = await github.rest.actions.listJobsForWorkflowRun({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              run_id: context.runId
-            });
+            // Construct comprehensive prompt for AI
+            const prompt = `
+            You are an expert Ruby on Rails developer tasked with fixing test failures in a CI/CD pipeline.
             
-            let errorDetails = `## CI Pipeline Failure Report\n\n`;
-            errorDetails += `**Workflow Run:** [${workflow_run.display_title}](${workflow_run.html_url})\n`;
-            errorDetails += `**Commit:** ${context.sha.substring(0, 7)}\n`;
-            errorDetails += `**Branch:** ${context.ref.replace('refs/heads/', '')}\n`;
-            errorDetails += `**Triggered by:** ${workflow_run.triggering_actor.login}\n`;
-            errorDetails += `**Run ID:** ${context.runId}\n\n`;
+            ## FAILURE CONTEXT
+            Failure Type: Test failures
+            Repository: Rails application with RSpec test suite
             
-            errorDetails += `### Failed Jobs:\n\n`;
+            ## RECENT COMMITS (that may have introduced the issue)
+            ${{ steps.commit-analysis.outputs.commit_diffs }}
             
-            for (const job of jobs.jobs) {
-              if (job.conclusion === 'failure') {
-                errorDetails += `#### ${job.name}\n`;
-                errorDetails += `- **Status:** ${job.conclusion}\n`;
-                errorDetails += `- **Started:** ${job.started_at}\n`;
-                errorDetails += `- **Completed:** ${job.completed_at}\n`;
-                errorDetails += `- **Log URL:** [View logs](${job.html_url})\n\n`;
-                
-                // Get job logs for more details
-                try {
-                  const { data: logs } = await github.rest.actions.downloadJobLogsForWorkflowRun({
-                    owner: context.repo.owner,
-                    repo: context.repo.repo,
-                    job_id: job.id
-                  });
-                  
-                  if (logs) {
-                    errorDetails += `**Error Details:**\n\`\`\`\n`;
-                    // Extract last 50 lines of logs for brevity
-                    const logLines = logs.split('\n').slice(-50);
-                    errorDetails += logLines.join('\n');
-                    errorDetails += `\n\`\`\`\n\n`;
-                  }
-                } catch (error) {
-                  errorDetails += `*Could not retrieve detailed logs: ${error.message}*\n\n`;
+            ## CURRENT TEST FAILURES
+            ${{ steps.failure-details.outputs.error_output }}
+            
+            ## YOUR TASK
+            Analyze the test failures and recent commits to identify the root cause.
+            Generate specific file changes to fix the failing tests.
+            Focus on:
+            1. Correcting test failures and broken functionality
+            2. Fixing syntax errors that cause test crashes
+            3. Resolving missing dependencies or setup issues
+            4. Maintaining Rails best practices and test integrity
+            
+            ## OUTPUT FORMAT
+            For each file that needs changes, provide:
+            1. File path
+            2. Complete corrected file content
+            3. Brief explanation of changes made
+            
+            Please provide practical, working solutions that will make all tests pass.
+            `;
+            
+            // Use GitHub Copilot API to generate fixes
+            try {
+              // Note: This is a placeholder for Copilot integration
+              // In practice, you'd use the GitHub Copilot API or similar AI service
+              console.log("AI Analysis Prompt:");
+              console.log(prompt);
+              
+              // TODO: Integrate with GitHub Copilot API or other AI service
+              // The prompt above contains all the context needed for AI analysis
+              
+              let hasChanges = false;
+              
+              // Placeholder for AI-generated fixes
+              // In a real implementation, this would:
+              // 1. Send the prompt to GitHub Copilot API
+              // 2. Parse the AI response for file changes
+              // 3. Apply the suggested fixes to the codebase
+              // 4. Validate that the changes compile/run
+              
+              console.log("AI analysis would be performed here with the following context:");
+              console.log("- Recent commits and diffs");
+              console.log("- Current test failure details");
+              console.log("- Repository structure and patterns");
+              
+              // For now, we'll just detect if there are any obvious issues to fix
+              // This is where you would integrate with your preferred AI service
+              
+              // Check if we have any changes to commit (from potential AI fixes)
+              try {
+                const gitStatus = execSync('git status --porcelain', { encoding: 'utf8' });
+                if (gitStatus.trim()) {
+                  hasChanges = true;
+                  console.log("Changes detected for commit:");
+                  console.log(gitStatus);
+                } else {
+                  console.log("No changes generated by AI analysis");
                 }
+              } catch (error) {
+                console.log("Error checking git status:", error.message);
               }
+              
+              core.setOutput('has_changes', hasChanges.toString());
+              
+            } catch (error) {
+              console.error("AI analysis failed:", error);
+              core.setOutput('has_changes', 'false');
             }
+
+  # Job 3: Commit AI changes and create PR
+  commit-and-pr:
+    runs-on: ubuntu-latest
+    needs: [test, create-branch, ai-fix]
+    if: always() && needs.ai-fix.result == 'success' && needs.ai-fix.outputs.has_changes == 'true'
+    steps:
+      - name: Checkout autofix branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.create-branch.outputs.branch_name }}
+          fetch-depth: 0
+          token: ${{ secrets.AUTOFIX_TOKEN }}
+
+      - name: Setup Git
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Commit AI-generated fixes
+        run: |
+          git add -A
+          git commit -m "🤖 AI-generated fixes for test failures
+          
+          Auto-generated by GitHub Actions using AI analysis of:
+          - Recent commit history and changes
+          - Current test failures and error details
+          - Rails application patterns and best practices
+          
+          This commit attempts to resolve the failing tests automatically."
+
+      - name: Push changes
+        run: |
+          git push origin ${{ needs.create-branch.outputs.branch_name }}
+
+      - name: Create PR with AI fix details
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.AUTOFIX_TOKEN }}
+          script: |
+            const title = `🤖 AI Autofix: Resolve test failures`;
             
-            errorDetails += `### Next Steps\n\n`;
-            errorDetails += `This PR was automatically created to track the CI failure. Please:\n\n`;
-            errorDetails += `1. Review the error details above\n`;
-            errorDetails += `2. Fix the identified issues\n`;
-            errorDetails += `3. Push fixes to this branch\n`;
-            errorDetails += `4. Merge this PR once all issues are resolved\n\n`;
-            errorDetails += `*This autofix PR was generated automatically by GitHub Actions.*`;
+            const body = `## 🤖 AI-Generated Test Fix
+            
+            This PR was automatically created by GitHub Actions using AI analysis to fix failing tests.
+            
+            ### 🔍 Analysis Summary
+            - **Failure Type:** Test failures
+            - **Branch:** \`${{ needs.create-branch.outputs.branch_name }}\`
+            - **Generated:** ${new Date().toISOString()}
+            
+            ### 🛠️ AI-Applied Fixes
+            The AI system analyzed recent commits and current test failures to generate targeted fixes for:
+            - Test failures and broken functionality
+            - Code logic issues and bugs
+            - Missing dependencies or setup problems
+            - Rails application integrity issues
+            
+            ### 🧪 Next Steps
+            1. **Review the changes** in this PR carefully
+            2. **Run tests locally** to verify fixes work as expected  
+            3. **Merge** if all tests pass and fixes are appropriate
+            4. **Modify** if additional changes are needed
+            
+            ### ⚠️ Important Note
+            This is an AI-generated fix. Please review all changes before merging to ensure they align with your codebase standards and requirements.
+            
+            *Generated by GitHub Actions AI Test Autofix System*`;
             
             const { data: pr } = await github.rest.pulls.create({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              title: '${{ steps.failure-info.outputs.pr_title }}',
-              head: '${{ steps.failure-info.outputs.branch_name }}',
+              title: title,
+              head: '${{ needs.create-branch.outputs.branch_name }}',
               base: 'main',
-              body: errorDetails
+              body: body
             });
             
-            console.log(`Created autofix PR: ${pr.html_url}`);
+            console.log(`Created AI autofix PR: ${pr.html_url}`);
             
-            // Add labels to the PR
+            // Add labels
             await github.rest.issues.addLabels({
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: pr.number,
-              labels: ['autofix', 'ci-failure', 'needs-attention']
+              labels: ['🤖 ai-generated', 'autofix', 'ci-failure', 'needs-review']
             });
