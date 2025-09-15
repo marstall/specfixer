@@ -202,9 +202,8 @@ jobs:
                   const completionPrompt = `${prompt}
 
 ## CURRENT FILE: ${filePath}
-\`\`\`ruby
-${currentContent}
-\`\`\`
+` + '```ruby\n' + `${currentContent}
+` + '```' + `
 
 Based on the test failures and commit history above, please provide a corrected version of this file that will fix the failing tests. Return only the corrected Ruby code without any explanations or markdown formatting.`;
 
