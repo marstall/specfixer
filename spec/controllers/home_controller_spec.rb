@@ -5,7 +5,7 @@ RSpec.describe HomeController, type: :controller do
     let!(:quote) { create(:quote) }
 
     before do
-      allow(Quote).to receive(:daily_quote).and_return(quote)
+      allow(Quote).to receive(:daily_quote).and_return("quote")
     end
 
     it 'returns http success' do
