@@ -4,7 +4,7 @@ class HomeController < ApplicationController
   end
 
   def refresh_quote
-    @quote_of_the_day = Quote.random_quote
+    #@quote_of_the_day = Quote.random_quote
     render partial: 'quote_card', locals: { quote: @quote_of_the_day }
   end
 end
