@@ -417,7 +417,13 @@ jobs:
               }
               
               // Always output commit message (even if no changes, for debugging)
-              core.setOutput('commit_message', commitMessage);
+              // Sanitize commit message to avoid shell interpretation issues
+              const sanitizedCommitMessage = commitMessage
+                .replace(/'/g, "'\"'\"'")  // Escape single quotes
+                .replace(/\n/g, ' ')       // Replace newlines with spaces
+                .replace(/\r/g, '')        // Remove carriage returns
+                .trim();
+              core.setOutput('commit_message', sanitizedCommitMessage);
               
               core.setOutput('has_changes', hasChanges.toString());
             
@@ -461,10 +467,8 @@ jobs:
           done
           
           # Commit the changes using Claude's generated commit message with Discourse standard prefix and bot emoji
-          # Use a temporary file to avoid shell quoting issues with special characters
-          echo "FIX: 🤖 ${{ steps.ai-analysis.outputs.commit_message }}" > /tmp/commit_message.txt
-          git commit -F /tmp/commit_message.txt
-          rm /tmp/commit_message.txt
+          # Commit message is now sanitized in JavaScript to avoid shell interpretation issues
+          git commit -m "FIX: 🤖 ${{ steps.ai-analysis.outputs.commit_message }}"
           
           # Push the changes
           git push origin ${{ needs.branch-create.outputs.branch_name }}
