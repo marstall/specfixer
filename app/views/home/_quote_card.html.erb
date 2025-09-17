@@ -1,23 +1,10 @@
 <div class="quote-card">
-  <% if quote %>
-    <div class="quote-content">
-      <blockquote class="quote-text">
-        "<%= quote.content %>"
-      </blockquote>
-      <div class="quote-attribution">
-        <span class="quote-author">— <%= quote.author %></span>
-        <span class="quote-category"><%= quote.category.titleize %></span>
-      </div>
-    </div>
+  <% if @quote_of_the_day %>
+    <blockquote>
+      <%= @quote_of_the_day.content %>
+    </blockquote>
+    <cite>— <%= @quote_of_the_day.author %></cite>
   <% else %>
-    <div class="quote-content">
-      <blockquote class="quote-text">
-        "No quotes available at the moment."
-      </blockquote>
-      <div class="quote-attribution">
-        <span class="quote-author">— SpecFixer</span>
-        <span class="quote-category">System</span>
-      </div>
-    </div>
+    <p>No quote available</p>
   <% end %>
 </div>
