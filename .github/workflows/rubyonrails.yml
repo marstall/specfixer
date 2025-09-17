@@ -539,13 +539,18 @@ jobs:
 
       - name: Create PR with AI fix details
         uses: actions/github-script@v7
+        env:
+          PR_TITLE: ${{ needs.ai-autofix.outputs.pr_title }}
+          PR_ANALYSIS: ${{ needs.ai-autofix.outputs.pr_analysis }}
+          MODIFIED_FILES: ${{ needs.ai-autofix.outputs.modified_files }}
+          BRANCH_NAME: ${{ needs.branch-create.outputs.branch_name }}
         with:
           github-token: ${{ secrets.AUTOFIX_TOKEN }}
           script: |
-            const prTitle = ${{ toJSON(needs.ai-autofix.outputs.pr_title) }};
-            const prAnalysis = ${{ toJSON(needs.ai-autofix.outputs.pr_analysis) }};
-            const modifiedFiles = ${{ toJSON(needs.ai-autofix.outputs.modified_files) }};
-            const branchName = ${{ toJSON(needs.branch-create.outputs.branch_name) }};
+            const prTitle = process.env.PR_TITLE || 'Resolve test failures';
+            const prAnalysis = process.env.PR_ANALYSIS || 'Claude AI attempted to fix failing tests.';
+            const modifiedFiles = process.env.MODIFIED_FILES || 'No files modified';
+            const branchName = process.env.BRANCH_NAME || 'autofix-branch';
             
             const title = `DEV: 🤖 ${prTitle}`;
             
