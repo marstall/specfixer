@@ -5,7 +5,7 @@
 # 3. Conditional job execution to skip unnecessary work
 # 4. Streamlined AI analysis with better error handling
 
-name: "Ruby on Rails CI (Optimized)"
+name: "Autofix (- run specs - claude attempts to fix broken ones - create PR)"
 on:
 #  push:
 #    branches: [ "main" ]
@@ -246,7 +246,14 @@ jobs:
             CONTENT:
             [complete corrected file content]
 
-            Focus only on files that need changes to fix the failing tests.`;
+            IMPORTANT RULES:
+            - Only provide the actual code fixes - NO explanatory comments or documentation in the files
+            - Do NOT append explanations, analysis, or comments to the end of files
+            - The file content should be clean production code only
+            - Keep existing code style and formatting
+            - Focus only on files that need changes to fix the failing tests
+
+            Provide only the minimal necessary changes to fix the test failures.`;
             
             try {
               console.log("Starting Claude AI analysis via AWS Bedrock...");
