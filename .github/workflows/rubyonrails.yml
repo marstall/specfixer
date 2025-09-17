@@ -452,6 +452,9 @@ jobs:
               if (hasChanges) {
                 console.log(`\n📊 Modified files: ${modifiedFiles.join(', ')}`);
                 core.setOutput('modified_files', modifiedFiles.join(','));
+              } else {
+                console.log(`\n📊 No files were modified by Claude AI`);
+                core.setOutput('modified_files', 'No files modified');
               }
               
               // Always output commit message (even if no changes, for debugging)
@@ -460,9 +463,15 @@ jobs:
               fs.writeFileSync('/tmp/commit_message.txt', commitMessageWithPrefix, 'utf8');
               console.log(`📝 Commit message written to file: ${commitMessageWithPrefix}`);
               
-              // Output PR title and analysis for PR creation
-              core.setOutput('pr_title', prTitle);
-              core.setOutput('pr_analysis', prAnalysis);
+              // Output PR title and analysis for PR creation (with fallbacks)
+              const finalPrTitle = prTitle || "Resolve test failures";
+              const finalPrAnalysis = prAnalysis || "Claude AI attempted to fix failing tests but no detailed analysis was provided.";
+              
+              console.log(`🎯 Final PR title: "${finalPrTitle}"`);
+              console.log(`🎯 Final PR analysis length: ${finalPrAnalysis.length} characters`);
+              
+              core.setOutput('pr_title', finalPrTitle);
+              core.setOutput('pr_analysis', finalPrAnalysis);
               core.setOutput('has_changes', hasChanges.toString());
             
             } catch (error) {
@@ -570,7 +579,7 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: pr.number,
-              labels: ['🤖 ai-generated', 'autofix', 'optimized', 'needs-review']
+              labels: ['🤖 autofix']
             });
             
             // Store PR number for verification step
@@ -611,7 +620,7 @@ jobs:
         id: verify-specs
         run: |
           echo "🧪 Running originally failing specs to verify Claude's fix..."
-          
+
           # Run the same specs that originally failed
           if bundle exec rspec --format documentation --color 2>&1 | tee spec_output.txt; then
             echo "✅ All specs are now passing!"
