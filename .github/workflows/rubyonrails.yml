@@ -146,6 +146,20 @@ jobs:
             const commitDiffs = process.env.COMMIT_DIFFS || 'No recent commits found';
             const errorOutput = process.env.ERROR_OUTPUT || 'No error output available';
             
+            // Debug: Check if API key is available (without logging the actual key)
+            const hasApiKey = !!process.env.OPENAI_API_KEY;
+            const apiKeyLength = process.env.OPENAI_API_KEY ? process.env.OPENAI_API_KEY.length : 0;
+            const apiKeyPrefix = process.env.OPENAI_API_KEY ? process.env.OPENAI_API_KEY.substring(0, 7) : 'none';
+            console.log(`API Key available: ${hasApiKey}`);
+            console.log(`API Key length: ${apiKeyLength}`);
+            console.log(`API Key prefix: ${apiKeyPrefix}...`);
+            
+            if (!hasApiKey) {
+              console.log('ERROR: OPENAI_API_KEY not found in environment variables');
+              console.log('Available env vars:', Object.keys(process.env).filter(k => k.includes('OPENAI')));
+              return;
+            }
+            
             // Construct comprehensive prompt for AI
             const prompt = [
               'You are an expert Ruby on Rails developer tasked with fixing test failures in a CI/CD pipeline.',
