@@ -85,19 +85,30 @@ jobs:
         id: test-run
         run: |
           echo "Running tests..."
-          if TEST_OUTPUT=$(bin/rake 2>&1); then
-            echo "test-output<<EOF" >> $GITHUB_OUTPUT
+          
+          # Capture test output regardless of success/failure
+          set +e  # Don't exit on error
+          TEST_OUTPUT=$(bin/rake 2>&1)
+          TEST_EXIT_CODE=$?
+          set -e  # Re-enable exit on error
+          
+          # Always capture the output
+          echo "test-output<<EOF" >> $GITHUB_OUTPUT
+          if [ $TEST_EXIT_CODE -eq 0 ]; then
             echo "TESTS PASSED" >> $GITHUB_OUTPUT
-            echo "$TEST_OUTPUT" >> $GITHUB_OUTPUT
-            echo "EOF" >> $GITHUB_OUTPUT
-            exit 0
           else
-            echo "test-output<<EOF" >> $GITHUB_OUTPUT
             echo "TEST FAILURES:" >> $GITHUB_OUTPUT
-            echo "$TEST_OUTPUT" >> $GITHUB_OUTPUT
-            echo "EOF" >> $GITHUB_OUTPUT
-            exit 1
           fi
+          echo "$TEST_OUTPUT" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+          
+          # Display the output in the log for immediate visibility
+          echo "=== TEST OUTPUT ==="
+          echo "$TEST_OUTPUT"
+          echo "=================="
+          
+          # Exit with the original test exit code
+          exit $TEST_EXIT_CODE
 
   # Only run autofix workflow if tests actually failed
   branch-create:
