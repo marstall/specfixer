@@ -152,6 +152,7 @@ jobs:
     if: failure() && needs.branch-create.result == 'success'
     outputs:
       has_changes: ${{ steps.ai-analysis.outputs.has_changes }}
+      modified_files: ${{ steps.ai-analysis.outputs.modified_files }}
     steps:
       - name: Checkout autofix branch
         uses: actions/checkout@v4
@@ -396,49 +397,10 @@ jobs:
               
               console.log(`\n📊 Summary: ${modifiedFiles.length} files modified, hasChanges: ${hasChanges}`);
             
-              // If changes were made, commit and push them
+              // Output the list of modified files for the next step
               if (hasChanges) {
-                console.log('\n=== COMMITTING AND PUSHING CHANGES ===');
-                
-                try {
-                  // Configure git user identity
-                  execSync('git config user.name "github-actions[bot]"', { encoding: 'utf8' });
-                  execSync('git config user.email "github-actions[bot]@users.noreply.github.com"', { encoding: 'utf8' });
-                  console.log('✅ Configured git user identity');
-                  
-                  // Stage only the files we actually modified
-                  console.log(`📁 Staging ${modifiedFiles.length} modified files:`);
-                  for (const file of modifiedFiles) {
-                    execSync(`git add "${file}"`, { encoding: 'utf8' });
-                    console.log(`   ✅ Staged: ${file}`);
-                  }
-                  
-                  // Show what's being committed
-                  const statusOutput = execSync('git status --porcelain', { encoding: 'utf8' });
-                  console.log('\nFILES TO BE COMMITTED:');
-                  console.log(statusOutput);
-                  
-                  // Show the actual diff
-                  const diffOutput = execSync('git diff --cached', { encoding: 'utf8' });
-                  console.log('\nFULL DIFF OF CHANGES:');
-                  console.log(diffOutput);
-                  
-                  // Commit the changes
-                  const commitMessage = '🤖 Claude AI fixes applied\n\nAuto-generated fixes based on test failure analysis';
-                  execSync(`git commit -m "${commitMessage}"`, { encoding: 'utf8' });
-                  console.log('✅ Committed changes');
-                  
-                  // Push the changes
-                  const currentBranch = execSync('git branch --show-current', { encoding: 'utf8' }).trim();
-                  execSync(`git push origin ${currentBranch}`, { encoding: 'utf8' });
-                  console.log(`✅ Pushed changes to ${currentBranch}`);
-                  
-                } catch (gitError) {
-                  console.error('❌ Git operation failed:', gitError.message);
-                  // Don't fail the step for git errors, but log them
-                }
-                
-                console.log('=== COMMIT AND PUSH COMPLETE ===\n');
+                console.log(`\n📊 Modified files: ${modifiedFiles.join(', ')}`);
+                core.setOutput('modified_files', modifiedFiles.join(','));
               }
               
               core.setOutput('has_changes', hasChanges.toString());
@@ -452,6 +414,47 @@ jobs:
               throw error; // Re-throw to ensure step fails
             }
 
+      - name: Show changes made
+        if: steps.ai-analysis.outputs.has_changes == 'true'
+        run: |
+          echo "📊 Files modified by Claude AI:"
+          echo "${{ steps.ai-analysis.outputs.modified_files }}" | tr ',' '\n' | sed 's/^/  ✅ /'
+          
+          echo ""
+          echo "📋 Git status:"
+          git status --porcelain
+          
+          echo ""
+          echo "📝 Full diff of changes:"
+          git diff
+
+      - name: Commit and push AI fixes
+        if: steps.ai-analysis.outputs.has_changes == 'true'
+        run: |
+          # Configure git user
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          
+          # Stage only the modified files
+          echo "📁 Staging modified files..."
+          echo "${{ steps.ai-analysis.outputs.modified_files }}" | tr ',' '\n' | while read file; do
+            if [ -n "$file" ]; then
+              git add "$file"
+              echo "   ✅ Staged: $file"
+            fi
+          done
+          
+          # Commit the changes
+          git commit -m "🤖 Claude AI fixes applied
+
+          Auto-generated fixes based on test failure analysis.
+          Modified files: ${{ steps.ai-analysis.outputs.modified_files }}"
+          
+          # Push the changes
+          git push origin ${{ needs.branch-create.outputs.branch_name }}
+          
+          echo "✅ Successfully committed and pushed AI fixes"
+
   # Commit and PR creation (unchanged but now more efficient due to upstream optimizations)
   create-pr:
     runs-on: ubuntu-latest
@@ -464,23 +467,6 @@ jobs:
           ref: ${{ needs.branch-create.outputs.branch_name }}
           fetch-depth: 0
           token: ${{ secrets.AUTOFIX_TOKEN }}
-
-      - name: Setup Git
-        run: |
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
-
-      - name: Commit AI-generated fixes
-        run: |
-          git add -A
-          git commit -m "🤖 AI-generated fixes for test failures (optimized)
-          
-          Auto-generated by optimized GitHub Actions workflow.
-          Changes based on recent commits and test failure analysis."
-
-      - name: Push changes
-        run: |
-          git push origin ${{ needs.branch-create.outputs.branch_name }}
 
       - name: Create PR with AI fix details
         uses: actions/github-script@v7
