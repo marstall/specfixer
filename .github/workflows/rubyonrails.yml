@@ -19,7 +19,7 @@ permissions:
 
 jobs:
   # Shared setup job to prepare environment once
-  setup:
+  env-setup:
     runs-on: ubuntu-latest
     outputs:
       cache-key: ${{ steps.cache-info.outputs.cache-key }}
@@ -51,9 +51,9 @@ jobs:
             rails-env-${{ runner.os }}-
 
   # Test job - now uses cached environment
-  test:
+  run-tests:
     runs-on: ubuntu-latest
-    needs: setup
+    needs: env-setup
     env:
       RAILS_ENV: test
     outputs:
@@ -70,7 +70,7 @@ jobs:
             vendor/bundle
             node_modules
             tmp/cache
-          key: ${{ needs.setup.outputs.cache-key }}
+          key: ${{ needs.env-setup.outputs.cache-key }}
 
       - name: Install Ruby (lightweight - gems already cached)
         uses: ruby/setup-ruby@78c01b705fd9d5ad960d432d3a0cfa341d50e410
@@ -100,10 +100,10 @@ jobs:
           fi
 
   # Only run autofix workflow if tests actually failed
-  create-branch:
+  branch-create:
     runs-on: ubuntu-latest
-    needs: [test]
-    if: failure() && needs.test.result == 'failure'
+    needs: [env-setup, run-tests]  # Add setup dependency for better layout
+    if: failure() && needs.run-tests.result == 'failure'
     outputs:
       branch_name: ${{ steps.branch-info.outputs.branch_name }}
       failure_type: ${{ steps.branch-info.outputs.failure_type }}
@@ -135,17 +135,17 @@ jobs:
           git push origin ${{ steps.branch-info.outputs.branch_name }}
 
   # Streamlined AI fix job - reuses environment and test output
-  ai-fix:
+  ai-autofix:
     runs-on: ubuntu-latest
-    needs: [setup, test, create-branch]
-    if: failure() && needs.create-branch.result == 'success'
+    needs: [env-setup, run-tests, branch-create]
+    if: failure() && needs.branch-create.result == 'success'
     outputs:
       has_changes: ${{ steps.ai-analysis.outputs.has_changes }}
     steps:
       - name: Checkout autofix branch
         uses: actions/checkout@v4
         with:
-          ref: ${{ needs.create-branch.outputs.branch_name }}
+          ref: ${{ needs.branch-create.outputs.branch_name }}
           fetch-depth: 0
           token: ${{ secrets.AUTOFIX_TOKEN }}
 
@@ -156,7 +156,7 @@ jobs:
             vendor/bundle
             node_modules
             tmp/cache
-          key: ${{ needs.setup.outputs.cache-key }}
+          key: ${{ needs.env-setup.outputs.cache-key }}
 
       - name: Install Ruby (lightweight)
         uses: ruby/setup-ruby@78c01b705fd9d5ad960d432d3a0cfa341d50e410
@@ -184,7 +184,7 @@ jobs:
         uses: actions/github-script@v7
         env:
           RECENT_DIFF: ${{ steps.commit-analysis.outputs.recent_diff }}
-          ERROR_OUTPUT: ${{ needs.test.outputs.test-output }}
+          ERROR_OUTPUT: ${{ needs.run-tests.outputs.test-output }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
         with:
           github-token: ${{ secrets.AUTOFIX_TOKEN }}
@@ -287,15 +287,15 @@ jobs:
             }
 
   # Commit and PR creation (unchanged but now more efficient due to upstream optimizations)
-  commit-and-pr:
+  create-pr:
     runs-on: ubuntu-latest
-    needs: [test, create-branch, ai-fix]
-    if: failure() && needs.ai-fix.result == 'success' && needs.ai-fix.outputs.has_changes == 'true'
+    needs: [env-setup, run-tests, branch-create, ai-autofix]  # Add setup for consistent layout
+    if: failure() && needs.ai-autofix.result == 'success' && needs.ai-autofix.outputs.has_changes == 'true'
     steps:
       - name: Checkout autofix branch
         uses: actions/checkout@v4
         with:
-          ref: ${{ needs.create-branch.outputs.branch_name }}
+          ref: ${{ needs.branch-create.outputs.branch_name }}
           fetch-depth: 0
           token: ${{ secrets.AUTOFIX_TOKEN }}
 
@@ -314,7 +314,7 @@ jobs:
 
       - name: Push changes
         run: |
-          git push origin ${{ needs.create-branch.outputs.branch_name }}
+          git push origin ${{ needs.branch-create.outputs.branch_name }}
 
       - name: Create PR with AI fix details
         uses: actions/github-script@v7
@@ -334,7 +334,7 @@ jobs:
             - Reduced redundant test runs
             
             ### 🔍 Analysis Summary
-            - **Branch:** \`${{ needs.create-branch.outputs.branch_name }}\`
+            - **Branch:** \`${{ needs.branch-create.outputs.branch_name }}\`
             - **Generated:** ${new Date().toISOString()}
             
             ### 🧪 Next Steps
@@ -348,7 +348,7 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               title: title,
-              head: '${{ needs.create-branch.outputs.branch_name }}',
+              head: '${{ needs.branch-create.outputs.branch_name }}',
               base: 'main',
               body: body
             });
