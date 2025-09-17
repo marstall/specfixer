@@ -196,7 +196,9 @@ jobs:
         env:
           RECENT_DIFF: ${{ steps.commit-analysis.outputs.recent_diff }}
           ERROR_OUTPUT: ${{ needs.run-tests.outputs.test-output }}
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION: us-west-2
         with:
           github-token: ${{ secrets.AUTOFIX_TOKEN }}
           script: |
@@ -206,8 +208,8 @@ jobs:
             const recentDiff = process.env.RECENT_DIFF || 'No recent changes';
             const errorOutput = process.env.ERROR_OUTPUT || 'No error output available';
             
-            if (!process.env.OPENAI_API_KEY) {
-              console.log('ERROR: OPENAI_API_KEY not found');
+            if (!process.env.AWS_ACCESS_KEY_ID || !process.env.AWS_SECRET_ACCESS_KEY) {
+              console.log('ERROR: AWS credentials not found');
               core.setOutput('has_changes', 'false');
               return;
             }
@@ -229,42 +231,121 @@ jobs:
             Focus only on files that need changes to fix the failing tests.`;
             
             try {
-              console.log("Starting streamlined AI analysis...");
-            
-              // Single API call for analysis
-              const response = await fetch('https://api.openai.com/v1/chat/completions', {
+              console.log("Starting Claude AI analysis via AWS Bedrock...");
+              
+              // AWS Bedrock configuration
+              const region = process.env.AWS_REGION;
+              const modelId = 'us.anthropic.claude-sonnet-4-20250514-v1.0';
+              const bedrockUrl = `https://bedrock-runtime.${region}.amazonaws.com/model/${modelId}/invoke`;
+              
+              // Create AWS Signature V4 for authentication
+              const crypto = require('crypto');
+              
+              function createSignature(method, url, headers, body, accessKey, secretKey, region, service, timestamp) {
+                const algorithm = 'AWS4-HMAC-SHA256';
+                const date = timestamp.toISOString().slice(0, 10).replace(/-/g, '');
+                const credentialScope = `${date}/${region}/${service}/aws4_request`;
+                
+                // Create canonical request
+                const urlObj = new URL(url);
+                const canonicalUri = urlObj.pathname;
+                const canonicalQueryString = urlObj.search.slice(1);
+                
+                const canonicalHeaders = Object.keys(headers)
+                  .sort()
+                  .map(key => `${key.toLowerCase()}:${headers[key]}`)
+                  .join('\n') + '\n';
+                
+                const signedHeaders = Object.keys(headers)
+                  .sort()
+                  .map(key => key.toLowerCase())
+                  .join(';');
+                
+                const payloadHash = crypto.createHash('sha256').update(body).digest('hex');
+                
+                const canonicalRequest = [
+                  method,
+                  canonicalUri,
+                  canonicalQueryString,
+                  canonicalHeaders,
+                  signedHeaders,
+                  payloadHash
+                ].join('\n');
+                
+                // Create string to sign
+                const canonicalRequestHash = crypto.createHash('sha256').update(canonicalRequest).digest('hex');
+                const stringToSign = [
+                  algorithm,
+                  timestamp.toISOString().replace(/[:-]|\.\d{3}/g, ''),
+                  credentialScope,
+                  canonicalRequestHash
+                ].join('\n');
+                
+                // Create signing key
+                const kDate = crypto.createHmac('sha256', `AWS4${secretKey}`).update(date).digest();
+                const kRegion = crypto.createHmac('sha256', kDate).update(region).digest();
+                const kService = crypto.createHmac('sha256', kRegion).update(service).digest();
+                const kSigning = crypto.createHmac('sha256', kService).update('aws4_request').digest();
+                
+                const signature = crypto.createHmac('sha256', kSigning).update(stringToSign).digest('hex');
+                
+                return `${algorithm} Credential=${accessKey}/${credentialScope}, SignedHeaders=${signedHeaders}, Signature=${signature}`;
+              }
+              
+              // Prepare request
+              const timestamp = new Date();
+              const body = JSON.stringify({
+                messages: [
+                  {
+                    role: 'user',
+                    content: `You are an expert Rails developer. Fix test failures efficiently.\n\n${prompt}`
+                  }
+                ],
+                max_tokens: 2000,
+                temperature: 0.1,
+                anthropic_version: 'bedrock-2023-05-31'
+              });
+              
+              const headers = {
+                'Content-Type': 'application/json',
+                'X-Amz-Date': timestamp.toISOString().replace(/[:-]|\.\d{3}/g, ''),
+                'Host': `bedrock-runtime.${region}.amazonaws.com`
+              };
+              
+              const authorization = createSignature(
+                'POST',
+                bedrockUrl,
+                headers,
+                body,
+                process.env.AWS_ACCESS_KEY_ID,
+                process.env.AWS_SECRET_ACCESS_KEY,
+                region,
+                'bedrock',
+                timestamp
+              );
+              
+              headers['Authorization'] = authorization;
+              
+              // Make the API call
+              const response = await fetch(bedrockUrl, {
                 method: 'POST',
-                headers: {
-                  'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
-                  'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                  model: 'gpt-3.5-turbo',
-                  messages: [
-                    {
-                      role: 'system',
-                      content: 'You are an expert Rails developer. Fix test failures efficiently.'
-                    },
-                    {
-                      role: 'user',
-                      content: prompt
-                    }
-                  ],
-                  max_tokens: 2000,
-                  temperature: 0.1
-                })
+                headers: headers,
+                body: body
               });
             
               if (!response.ok) {
-                throw new Error(`API error: ${response.status}`);
+                const errorText = await response.text();
+                console.error(`AWS Bedrock API error: ${response.status} ${response.statusText}`);
+                console.error(`Error details: ${errorText}`);
+                throw new Error(`AWS Bedrock API failed with status ${response.status}: ${response.statusText}. Details: ${errorText}`);
               }
             
               const responseData = await response.json();
               let hasChanges = false;
             
-              if (responseData?.choices?.[0]?.message?.content) {
-                const analysis = responseData.choices[0].message.content.trim();
-                console.log("AI analysis received, parsing...");
+              if (responseData?.content?.[0]?.text) {
+                const analysis = responseData.content[0].text.trim();
+                console.log("Claude AI analysis received, parsing...");
             
                 // Parse and apply fixes
                 const sections = analysis.split('FILE:');
@@ -293,8 +374,12 @@ jobs:
               core.setOutput('has_changes', hasChanges.toString());
             
             } catch (error) {
-              console.error("AI analysis error:", error.message);
+              console.error("Claude AI analysis error:", error.message);
               core.setOutput('has_changes', 'false');
+              
+              // CRITICAL: Fail the step when Bedrock API fails
+              core.setFailed(`Claude AI analysis failed: ${error.message}`);
+              throw error; // Re-throw to ensure step fails
             }
 
   # Commit and PR creation (unchanged but now more efficient due to upstream optimizations)
