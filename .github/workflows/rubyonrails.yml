@@ -349,14 +349,28 @@ jobs:
                 const analysis = responseData.content[0].text.trim();
                 console.log("Claude AI analysis received, parsing...");
             
-                // Extract PR title and analysis
-                const prTitleMatch = analysis.match(/PR_TITLE:\s*\n(.+?)(?=\n\n|$)/s);
-                prTitle = prTitleMatch ? prTitleMatch[1].trim() : "AI Autofix: Resolve test failures";
-                console.log(`📋 Generated PR title: ${prTitle}`);
+                // Extract PR title and analysis with flexible parsing
+                const prTitleMatch = analysis.match(/PR_TITLE:\s*\n(.+?)(?=\n\n|\nPR_ANALYSIS:|\nFILE:|$)/s);
+                if (prTitleMatch) {
+                  prTitle = prTitleMatch[1].trim();
+                  console.log(`📋 Generated PR title: ${prTitle}`);
+                } else {
+                  // Fallback: try to extract from commit message or use default
+                  const commitMatch = analysis.match(/COMMIT_MESSAGE:\s*\n(.+?)(?=\n\n|$)/s);
+                  prTitle = commitMatch ? commitMatch[1].trim() : "AI Autofix: Resolve test failures";
+                  console.log(`📋 Using fallback PR title: ${prTitle}`);
+                }
                 
                 const prAnalysisMatch = analysis.match(/PR_ANALYSIS:\s*\n([\s\S]+?)(?=\nFILE:|$)/);
-                prAnalysis = prAnalysisMatch ? prAnalysisMatch[1].trim() : "Claude AI attempted to fix failing tests.";
-                console.log(`📊 Generated PR analysis: ${prAnalysis.substring(0, 100)}...`);
+                if (prAnalysisMatch) {
+                  prAnalysis = prAnalysisMatch[1].trim();
+                  console.log(`📊 Generated PR analysis: ${prAnalysis.substring(0, 100)}...`);
+                } else {
+                  // Fallback: use the first part of Claude's analysis as reasoning
+                  const fallbackMatch = analysis.match(/^([\s\S]+?)(?=\nFILE:|$)/);
+                  prAnalysis = fallbackMatch ? fallbackMatch[1].trim() : "Claude AI attempted to fix failing tests.";
+                  console.log(`📊 Using fallback PR analysis: ${prAnalysis.substring(0, 100)}...`);
+                }
             
                 // Extract commit message
                 const commitMatch = analysis.match(/COMMIT_MESSAGE:\s*\n(.+?)(?=\n\n|$)/s);

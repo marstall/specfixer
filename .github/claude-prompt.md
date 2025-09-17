@@ -37,31 +37,34 @@ Identify the minimal change needed:
 
 ## Output Format
 
-Provide your analysis and fix in this format:
+**CRITICAL: You MUST follow this exact format. Start your response with PR_TITLE:**
+
 ```
 PR_TITLE:
-[Concise, descriptive title of the bug fixed or change made - no "DEV:" prefix needed]
+Fix missing quote assignment in home controller
 
 PR_ANALYSIS:
 **Problem Analysis:**
-[What the test expects vs. what's actually happening]
+The test expects @quote_of_the_day to be assigned but it's currently nil because the assignment line is commented out.
 
 **Root Cause Investigation:**
-[Most likely reasons for the failure - commented code, missing assignments, etc.]
+Looking at the controller, there's a commented-out line that assigns @quote_of_the_day = Quote.random. This is likely the cause of the test failure.
 
 **Developer Perspective:**
-[What an experienced Discourse developer would immediately suspect]
+An experienced Discourse developer would immediately suspect commented-out code as the culprit when instance variables are nil in tests.
 
 **Proposed Solution:**
-[Description of the minimal change needed and why it should work]
+Uncomment the @quote_of_the_day assignment line to restore the expected functionality.
 
 FILE: path/to/file.rb
 CONTENT:
 [complete corrected file content]
 
 COMMIT_MESSAGE:
-[A concise, descriptive commit message that explains what bug was fixed]
+Uncomment quote assignment to fix failing spec
 ```
+
+**IMPORTANT: Always start with PR_TITLE: and include PR_ANALYSIS: exactly as shown above.**
 
 ## CRITICAL RULES:
 - **PRIORITIZE APPLICATION CODE**: Always check app/ directory first before modifying specs
