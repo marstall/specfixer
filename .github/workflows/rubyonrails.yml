@@ -342,6 +342,8 @@ jobs:
               let hasChanges = false;
               const modifiedFiles = []; // Track files we actually modify
               let commitMessage = "🤖 Claude AI fixes applied"; // Declare at proper scope
+              let prTitle = "AI Autofix: Resolve test failures"; // Declare at proper scope
+              let prAnalysis = "Claude AI attempted to fix failing tests."; // Declare at proper scope
             
               if (responseData?.content?.[0]?.text) {
                 const analysis = responseData.content[0].text.trim();
@@ -349,11 +351,11 @@ jobs:
             
                 // Extract PR title and analysis
                 const prTitleMatch = analysis.match(/PR_TITLE:\s*\n(.+?)(?=\n\n|$)/s);
-                const prTitle = prTitleMatch ? prTitleMatch[1].trim() : "AI Autofix: Resolve test failures";
+                prTitle = prTitleMatch ? prTitleMatch[1].trim() : "AI Autofix: Resolve test failures";
                 console.log(`📋 Generated PR title: ${prTitle}`);
                 
                 const prAnalysisMatch = analysis.match(/PR_ANALYSIS:\s*\n([\s\S]+?)(?=\nFILE:|$)/);
-                const prAnalysis = prAnalysisMatch ? prAnalysisMatch[1].trim() : "Claude AI attempted to fix failing tests.";
+                prAnalysis = prAnalysisMatch ? prAnalysisMatch[1].trim() : "Claude AI attempted to fix failing tests.";
                 console.log(`📊 Generated PR analysis: ${prAnalysis.substring(0, 100)}...`);
             
                 // Extract commit message
