@@ -222,7 +222,6 @@ jobs:
             }
             
             // Load prompt from external file and substitute variables
-            const fs = require('fs');
             const promptTemplate = fs.readFileSync('.github/claude-prompt.md', 'utf8');
             const prompt = promptTemplate
               .replace('{recentDiff}', recentDiff)
