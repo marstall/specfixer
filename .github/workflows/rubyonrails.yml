@@ -243,12 +243,22 @@ jobs:
             [A concise, descriptive commit message that explains what bug was fixed, written like a regular developer would write it]
 
             IMPORTANT RULES:
+            - PRIORITIZE APPLICATION CODE FIXES: Always look for fixes in the application code (app/) first before modifying specs
+            - Specs are the source of truth: Only modify specs if they are genuinely incorrect or testing the wrong behavior
+            - Look for commented-out code, missing assignments, incorrect method calls, or logic errors in controllers/models
+            - Check if the application code matches what the spec expects (return values, instance variables, method calls)
             - Only provide the actual code fixes - NO explanatory comments or documentation in the files
             - Do NOT append explanations, analysis, or comments to the end of files
             - The file content should be clean production code only
             - Keep existing code style and formatting
             - Focus only on files that need changes to fix the failing tests
             - Write a natural commit message that describes the specific bug/issue that was resolved
+
+            DEBUGGING APPROACH:
+            1. First, analyze what the spec expects the application to do
+            2. Then check if the application code actually does that
+            3. Look for missing code, commented-out lines, or incorrect implementations
+            4. Only modify specs if they are testing incorrect behavior
 
             Provide only the minimal necessary changes to fix the test failures.`;
             
