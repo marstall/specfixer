@@ -461,7 +461,10 @@ jobs:
           done
           
           # Commit the changes using Claude's generated commit message with Discourse standard prefix and bot emoji
-          git commit -m "FIX: 🤖 ${{ steps.ai-analysis.outputs.commit_message }}"
+          # Use a temporary file to avoid shell quoting issues with special characters
+          echo "FIX: 🤖 ${{ steps.ai-analysis.outputs.commit_message }}" > /tmp/commit_message.txt
+          git commit -F /tmp/commit_message.txt
+          rm /tmp/commit_message.txt
           
           # Push the changes
           git push origin ${{ needs.branch-create.outputs.branch_name }}
