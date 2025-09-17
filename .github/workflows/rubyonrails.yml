@@ -5,7 +5,7 @@
 # 3. Conditional job execution to skip unnecessary work
 # 4. Streamlined AI analysis with better error handling
 
-name: "Autofix (- run specs - claude attempts to fix broken ones - create PR)"
+name: "Autofix (use claude to create PR with fixes failing specs)"
 on:
 #  push:
 #    branches: [ "main" ]
@@ -233,7 +233,11 @@ jobs:
             }
             
             // Streamlined prompt focusing on key information
-            const prompt = `You are a Rails developer fixing test failures.
+            const prompt = `You are a Rails developer fixing test failures in a discourse plugin.
+            Where necessary and appropriate, you should consider the discourse core codebase in your fix.
+            The discourse core codebase is at https://github.com/discourse/discourse. 
+            Recent discourse core commits are often the cause of failing specs, so look at those.
+            Also make smart searches of the discourse code base relevant to the failing spec if you think the issue might be in the discourse core.
 
             RECENT CHANGES:
             ${recentDiff}
@@ -246,12 +250,16 @@ jobs:
             CONTENT:
             [complete corrected file content]
 
+            COMMIT_MESSAGE:
+            [A concise, descriptive commit message that explains what bug was fixed, written like a regular developer would write it]
+
             IMPORTANT RULES:
             - Only provide the actual code fixes - NO explanatory comments or documentation in the files
             - Do NOT append explanations, analysis, or comments to the end of files
             - The file content should be clean production code only
             - Keep existing code style and formatting
             - Focus only on files that need changes to fix the failing tests
+            - Write a natural commit message that describes the specific bug/issue that was resolved
 
             Provide only the minimal necessary changes to fix the test failures.`;
             
@@ -374,6 +382,14 @@ jobs:
                 const analysis = responseData.content[0].text.trim();
                 console.log("Claude AI analysis received, parsing...");
             
+                // Extract commit message first
+                let commitMessage = "🤖 Claude AI fixes applied";
+                const commitMatch = analysis.match(/COMMIT_MESSAGE:\s*\n(.+?)(?=\n\n|$)/s);
+                if (commitMatch) {
+                  commitMessage = commitMatch[1].trim();
+                  console.log(`📝 Generated commit message: ${commitMessage}`);
+                }
+            
                 // Parse and apply fixes
                 const sections = analysis.split('FILE:');
             
@@ -394,7 +410,16 @@ jobs:
                     continue;
                   }
             
-                  const newContent = lines.slice(contentIndex + 1).join('\n').trim();
+                  // Find where CONTENT section ends (before COMMIT_MESSAGE or end of section)
+                  let contentEndIndex = lines.length;
+                  for (let i = contentIndex + 1; i < lines.length; i++) {
+                    if (lines[i].startsWith('COMMIT_MESSAGE:')) {
+                      contentEndIndex = i;
+                      break;
+                    }
+                  }
+            
+                  const newContent = lines.slice(contentIndex + 1, contentEndIndex).join('\n').trim();
             
                   if (newContent && newContent.length > 10) {
                     // Read original content for comparison
@@ -421,10 +446,11 @@ jobs:
               
               console.log(`\n📊 Summary: ${modifiedFiles.length} files modified, hasChanges: ${hasChanges}`);
             
-              // Output the list of modified files for the next step
+              // Output the list of modified files and commit message for the next step
               if (hasChanges) {
                 console.log(`\n📊 Modified files: ${modifiedFiles.join(', ')}`);
                 core.setOutput('modified_files', modifiedFiles.join(','));
+                core.setOutput('commit_message', commitMessage);
               }
               
               core.setOutput('has_changes', hasChanges.toString());
@@ -468,11 +494,8 @@ jobs:
             fi
           done
           
-          # Commit the changes
-          git commit -m "🤖 Claude AI fixes applied
-
-          Auto-generated fixes based on test failure analysis.
-          Modified files: ${{ steps.ai-analysis.outputs.modified_files }}"
+          # Commit the changes using Claude's generated commit message with Discourse standard prefix
+          git commit -m "FIX: ${{ steps.ai-analysis.outputs.commit_message }}"
           
           # Push the changes
           git push origin ${{ needs.branch-create.outputs.branch_name }}
