@@ -39,14 +39,21 @@ Identify the minimal change needed:
 
 Provide your analysis and fix in this format:
 ```
-ANALYSIS:
-[Brief explanation of what you think is wrong and why]
+PR_TITLE:
+[Concise, descriptive title of the bug fixed or change made - no "DEV:" prefix needed]
 
-LIKELY_CAUSE:
-[The most probable root cause based on your experience]
+PR_ANALYSIS:
+**Problem Analysis:**
+[What the test expects vs. what's actually happening]
 
-MINIMAL_FIX:
-[Description of the smallest change needed]
+**Root Cause Investigation:**
+[Most likely reasons for the failure - commented code, missing assignments, etc.]
+
+**Developer Perspective:**
+[What an experienced Discourse developer would immediately suspect]
+
+**Proposed Solution:**
+[Description of the minimal change needed and why it should work]
 
 FILE: path/to/file.rb
 CONTENT:
