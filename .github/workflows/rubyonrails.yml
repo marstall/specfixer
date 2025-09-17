@@ -5,7 +5,7 @@
 # 3. Conditional job execution to skip unnecessary work
 # 4. Streamlined AI analysis with better error handling
 
-name: "Autofix (use claude to create PR with fixes failing specs)"
+name: "Autofix (use Claude to create PR with fixes for failing specs)"
 on:
 #  push:
 #    branches: [ "main" ]
@@ -450,8 +450,10 @@ jobs:
               if (hasChanges) {
                 console.log(`\n📊 Modified files: ${modifiedFiles.join(', ')}`);
                 core.setOutput('modified_files', modifiedFiles.join(','));
-                core.setOutput('commit_message', commitMessage);
               }
+              
+              // Always output commit message (even if no changes, for debugging)
+              core.setOutput('commit_message', commitMessage);
               
               core.setOutput('has_changes', hasChanges.toString());
             
