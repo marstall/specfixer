@@ -248,12 +248,12 @@ jobs:
                 
                 // Create canonical request
                 const urlObj = new URL(url);
-                const canonicalUri = urlObj.pathname;
+                const canonicalUri = encodeURI(urlObj.pathname).replace(/:/g, '%3A');
                 const canonicalQueryString = urlObj.search.slice(1);
                 
                 const canonicalHeaders = Object.keys(headers)
                   .sort()
-                  .map(key => `${key.toLowerCase()}:${headers[key]}`)
+                  .map(key => `${key.toLowerCase()}:${headers[key].trim()}`)
                   .join('\n') + '\n';
                 
                 const signedHeaders = Object.keys(headers)
