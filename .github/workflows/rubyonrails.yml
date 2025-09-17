@@ -343,6 +343,7 @@ jobs:
             
               const responseData = await response.json();
               let hasChanges = false;
+              const modifiedFiles = []; // Track files we actually modify
             
               if (responseData?.content?.[0]?.text) {
                 const analysis = responseData.content[0].text.trim();
@@ -357,38 +358,59 @@ jobs:
                   const lines = section.trim().split('\n');
                   const filePath = lines[0].trim();
             
-                  if (!fs.existsSync(filePath)) continue;
+                  if (!fs.existsSync(filePath)) {
+                    console.log(`⚠️  File not found: ${filePath}`);
+                    continue;
+                  }
             
                   const contentIndex = lines.findIndex(line => line.startsWith('CONTENT:'));
-                  if (contentIndex === -1) continue;
+                  if (contentIndex === -1) {
+                    console.log(`⚠️  No CONTENT section found for: ${filePath}`);
+                    continue;
+                  }
             
                   const newContent = lines.slice(contentIndex + 1).join('\n').trim();
             
                   if (newContent && newContent.length > 10) {
-                    // Read original content for diff display
+                    // Read original content for comparison
                     const originalContent = fs.readFileSync(filePath, 'utf8');
                     
-                    // Write the new content
-                    fs.writeFileSync(filePath, newContent, 'utf8');
-                    hasChanges = true;
-                    
-                    console.log(`✅ Applied fix to ${filePath}`);
+                    // Only modify if content is actually different
+                    if (originalContent.trim() !== newContent.trim()) {
+                      // Write the new content
+                      fs.writeFileSync(filePath, newContent, 'utf8');
+                      hasChanges = true;
+                      modifiedFiles.push(filePath);
+                      
+                      console.log(`✅ Applied fix to ${filePath}`);
+                    } else {
+                      console.log(`ℹ️  No changes needed for ${filePath} (content identical)`);
+                    }
+                  } else {
+                    console.log(`⚠️  Content too short or empty for: ${filePath}`);
                   }
                 }
+              } else {
+                console.log('⚠️  No content found in Claude response');
               }
+              
+              console.log(`\n📊 Summary: ${modifiedFiles.length} files modified, hasChanges: ${hasChanges}`);
             
               // If changes were made, commit and push them
               if (hasChanges) {
                 console.log('\n=== COMMITTING AND PUSHING CHANGES ===');
                 
                 try {
-                  // Stage all changes
-                  execSync('git add -A', { encoding: 'utf8' });
-                  console.log('✅ Staged all changes');
+                  // Stage only the files we actually modified
+                  console.log(`📁 Staging ${modifiedFiles.length} modified files:`);
+                  for (const file of modifiedFiles) {
+                    execSync(`git add "${file}"`, { encoding: 'utf8' });
+                    console.log(`   ✅ Staged: ${file}`);
+                  }
                   
                   // Show what's being committed
                   const statusOutput = execSync('git status --porcelain', { encoding: 'utf8' });
-                  console.log('FILES TO BE COMMITTED:');
+                  console.log('\nFILES TO BE COMMITTED:');
                   console.log(statusOutput);
                   
                   // Show the actual diff
