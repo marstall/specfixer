@@ -365,13 +365,55 @@ jobs:
                   const newContent = lines.slice(contentIndex + 1).join('\n').trim();
             
                   if (newContent && newContent.length > 10) {
+                    // Read original content for diff display
+                    const originalContent = fs.readFileSync(filePath, 'utf8');
+                    
+                    // Write the new content
                     fs.writeFileSync(filePath, newContent, 'utf8');
                     hasChanges = true;
-                    console.log(`Applied fix to ${filePath}`);
+                    
+                    console.log(`✅ Applied fix to ${filePath}`);
                   }
                 }
               }
             
+              // If changes were made, commit and push them
+              if (hasChanges) {
+                console.log('\n=== COMMITTING AND PUSHING CHANGES ===');
+                
+                try {
+                  // Stage all changes
+                  execSync('git add -A', { encoding: 'utf8' });
+                  console.log('✅ Staged all changes');
+                  
+                  // Show what's being committed
+                  const statusOutput = execSync('git status --porcelain', { encoding: 'utf8' });
+                  console.log('FILES TO BE COMMITTED:');
+                  console.log(statusOutput);
+                  
+                  // Show the actual diff
+                  const diffOutput = execSync('git diff --cached', { encoding: 'utf8' });
+                  console.log('\nFULL DIFF OF CHANGES:');
+                  console.log(diffOutput);
+                  
+                  // Commit the changes
+                  const commitMessage = '🤖 Claude AI fixes applied\n\nAuto-generated fixes based on test failure analysis';
+                  execSync(`git commit -m "${commitMessage}"`, { encoding: 'utf8' });
+                  console.log('✅ Committed changes');
+                  
+                  // Push the changes
+                  const currentBranch = execSync('git branch --show-current', { encoding: 'utf8' }).trim();
+                  execSync(`git push origin ${currentBranch}`, { encoding: 'utf8' });
+                  console.log(`✅ Pushed changes to ${currentBranch}`);
+                  
+                } catch (gitError) {
+                  console.error('❌ Git operation failed:', gitError.message);
+                  // Don't fail the step for git errors, but log them
+                }
+                
+                console.log('=== COMMIT AND PUSH COMPLETE ===\n');
+              }
+              
               core.setOutput('has_changes', hasChanges.toString());
             
             } catch (error) {
