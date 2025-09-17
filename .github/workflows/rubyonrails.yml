@@ -542,19 +542,26 @@ jobs:
         with:
           github-token: ${{ secrets.AUTOFIX_TOKEN }}
           script: |
-            const title = `DEV: 🤖 ${{ needs.ai-autofix.outputs.pr_title }}`;
+            const prTitle = ${{ toJSON(needs.ai-autofix.outputs.pr_title) }};
+            const prAnalysis = ${{ toJSON(needs.ai-autofix.outputs.pr_analysis) }};
+            const modifiedFiles = ${{ toJSON(needs.ai-autofix.outputs.modified_files) }};
+            const branchName = ${{ toJSON(needs.branch-create.outputs.branch_name) }};
             
+            const title = `DEV: 🤖 ${prTitle}`;
+            
+            const timestamp = new Date().toISOString();
             const body = `## 🤖 AI-Generated Test Fix
             
             This PR was automatically created by Claude AI to fix failing specs in this Discourse plugin.
             
             ### 🧠 Claude's Analysis
             
-            ${{ needs.ai-autofix.outputs.pr_analysis }}
+            ${prAnalysis}
             
             ### 📋 Changes Made
-            - **Files Modified:** ${{ needs.ai-autofix.outputs.modified_files }}
-            - **Branch:** \`${{ needs.branch-create.outputs.branch_name }}\`
+            - **Files Modified:** ${modifiedFiles}
+            - **Branch:** \`${branchName}\`
+            - **Generated:** ${timestamp}
             ### 🧪 Next Steps
             1. Review Claude's analysis and reasoning above
             2. Examine the proposed code changes
