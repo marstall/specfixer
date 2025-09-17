@@ -553,7 +553,7 @@ jobs:
             ### 📋 Changes Made
             - **Files Modified:** ${{ needs.ai-autofix.outputs.modified_files }}
             - **Branch:** \`${{ needs.branch-create.outputs.branch_name }}\`
-            - **Generated:** ${new Date().toISOString()}
+            - **Generated:** ` + new Date().toISOString()
             
             ### 🧪 Next Steps
             1. Review Claude's analysis and reasoning above
