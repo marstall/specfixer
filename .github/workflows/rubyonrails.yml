@@ -401,6 +401,11 @@ jobs:
                 console.log('\n=== COMMITTING AND PUSHING CHANGES ===');
                 
                 try {
+                  // Configure git user identity
+                  execSync('git config user.name "github-actions[bot]"', { encoding: 'utf8' });
+                  execSync('git config user.email "github-actions[bot]@users.noreply.github.com"', { encoding: 'utf8' });
+                  console.log('✅ Configured git user identity');
+                  
                   // Stage only the files we actually modified
                   console.log(`📁 Staging ${modifiedFiles.length} modified files:`);
                   for (const file of modifiedFiles) {
