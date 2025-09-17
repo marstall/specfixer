@@ -159,6 +159,8 @@ jobs:
     outputs:
       has_changes: ${{ steps.ai-analysis.outputs.has_changes }}
       modified_files: ${{ steps.ai-analysis.outputs.modified_files }}
+      pr_title: ${{ steps.ai-analysis.outputs.pr_title }}
+      pr_analysis: ${{ steps.ai-analysis.outputs.pr_analysis }}
     steps:
       - name: Checkout autofix branch
         uses: actions/checkout@v4
