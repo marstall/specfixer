@@ -235,7 +235,7 @@ jobs:
               
               // AWS Bedrock configuration
               const region = process.env.AWS_REGION;
-              const modelId = 'us.anthropic.claude-sonnet-4-20250514-v1.0';
+              const modelId = 'us.anthropic.claude-sonnet-4-20250514-v1:0';
               const bedrockUrl = `https://bedrock-runtime.${region}.amazonaws.com/model/${modelId}/invoke`;
               
               // Create AWS Signature V4 for authentication
@@ -295,15 +295,16 @@ jobs:
               // Prepare request
               const timestamp = new Date();
               const body = JSON.stringify({
+                anthropic_version: 'bedrock-2023-05-31',
+                max_tokens: 2000,
+                temperature: 0.1,
+                system: 'You are an expert Rails developer. You are intimately familiar with the discourse core codebase and variety of techniques for creating discourse plugins. Fix test failures efficiently. Make sure to use the latest approaches to Discourse plugin development.',
                 messages: [
                   {
                     role: 'user',
-                    content: `You are an expert Rails developer. Fix test failures efficiently.\n\n${prompt}`
+                    content: prompt
                   }
-                ],
-                max_tokens: 2000,
-                temperature: 0.1,
-                anthropic_version: 'bedrock-2023-05-31'
+                ]
               });
               
               const headers = {
