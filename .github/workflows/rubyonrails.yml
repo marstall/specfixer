@@ -76,7 +76,7 @@ jobs:
         uses: ruby/setup-ruby@78c01b705fd9d5ad960d432d3a0cfa341d50e410
         with:
           ruby-version: '3.3.1'
-          bundler-cache: false  # Skip bundler cache since we restored it
+          bundler-cache: true  # Let ruby/setup-ruby handle bundler cache properly
 
       - name: Set up database schema
         run: bin/rails db:create db:migrate
@@ -162,7 +162,7 @@ jobs:
         uses: ruby/setup-ruby@78c01b705fd9d5ad960d432d3a0cfa341d50e410
         with:
           ruby-version: '3.3.1'
-          bundler-cache: false
+          bundler-cache: true
 
       - name: Analyze commit history (optimized)
         id: commit-analysis
