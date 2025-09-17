@@ -243,6 +243,7 @@ jobs:
             [A concise, descriptive commit message that explains what bug was fixed, written like a regular developer would write it]
 
             IMPORTANT RULES:
+            - MAKE MINIMAL CHANGES ONLY: Change as little code as possible to fix the failing test
             - PRIORITIZE APPLICATION CODE FIXES: Always look for fixes in the application code (app/) first before modifying specs
             - Specs are the source of truth: Only modify specs if they are genuinely incorrect or testing the wrong behavior
             - Look for commented-out code, missing assignments, incorrect method calls, or logic errors in controllers/models
@@ -254,11 +255,19 @@ jobs:
             - Focus only on files that need changes to fix the failing tests
             - Write a natural commit message that describes the specific bug/issue that was resolved
 
+            MINIMAL CHANGE PRINCIPLE:
+            - If uncommenting a single line fixes the test, do ONLY that
+            - If adding one missing assignment fixes the test, do ONLY that
+            - Do NOT refactor, optimize, or improve code beyond what's needed to pass the test
+            - Do NOT add error handling, validations, or other "improvements" unless the test specifically requires them
+            - Preserve existing code structure and logic wherever possible
+
             DEBUGGING APPROACH:
             1. First, analyze what the spec expects the application to do
             2. Then check if the application code actually does that
             3. Look for missing code, commented-out lines, or incorrect implementations
-            4. Only modify specs if they are testing incorrect behavior
+            4. Make the smallest possible change to align the code with the spec expectation
+            5. Only modify specs if they are testing incorrect behavior
 
             Provide only the minimal necessary changes to fix the test failures.`;
             
