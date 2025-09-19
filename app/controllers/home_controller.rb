@@ -5,6 +5,11 @@ class HomeController < ApplicationController
 
   def refresh_quote
     @quote_of_the_day = Quote.random_quote
-    #render partial: 'quote_card', locals: { quote: @quote_of_the_day }
+    
+    if request.xhr?
+      render partial: 'quote_card'
+    else
+      redirect_to root_path
+    end
   end
 end
