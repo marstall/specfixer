@@ -529,6 +529,8 @@ jobs:
     runs-on: ubuntu-latest
     needs: [env-setup, run-tests, branch-create, ai-autofix]  # Add setup for consistent layout
     if: failure() && needs.ai-autofix.result == 'success' && needs.ai-autofix.outputs.has_changes == 'true'
+    outputs:
+      pr_number: ${{ steps.create-pr-step.outputs.pr_number }}
     steps:
       - name: Checkout autofix branch
         uses: actions/checkout@v4
@@ -538,6 +540,7 @@ jobs:
           token: ${{ secrets.AUTOFIX_TOKEN }}
 
       - name: Create PR with AI fix details
+        id: create-pr-step
         uses: actions/github-script@v7
         env:
           PR_TITLE: ${{ needs.ai-autofix.outputs.pr_title }}
