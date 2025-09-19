@@ -2,7 +2,6 @@ source 'https://rubygems.org'
 
 gemspec
 
-group :test, :development do
-  gem 'rspec'
+group :test do
   gem 'rspec-rails'
 end
