@@ -1,8 +1,8 @@
 source 'https://rubygems.org'
 
-gem 'rails'
+gemspec
 
 group :development, :test do
+  gem 'rspec'
   gem 'rspec-rails'
-  gem 'factory_bot_rails'
 end
