@@ -4,7 +4,7 @@ class HomeController < ApplicationController
   end
 
   def refresh_quote
-    @quote_of_the_day = Quote.random
+    @quote_of_the_day = Quote.random_quote
     
     respond_to do |format|
       format.html { redirect_to root_path }

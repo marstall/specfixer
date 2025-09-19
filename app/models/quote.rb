@@ -1,31 +1,28 @@
-class Quote < ActiveRecord::Base
+class Quote < ApplicationRecord
   validates :content, presence: true
   validates :author, presence: true
+  validates :category, presence: true
+
+  scope :by_category, ->(category) { where(category: category) }
 
   def self.daily_quote
-    # Return a consistent quote for the day based on date
-    # This ensures the same quote is shown throughout the day
-    date_seed = Date.current.strftime("%Y%m%d").to_i
-    quotes = all.to_a
-    return create_default_quote if quotes.empty?
-    
-    quotes[date_seed % quotes.length]
+    random_quote
   end
 
-  def self.random
-    # Return a random quote
-    quotes = all.to_a
-    return create_default_quote if quotes.empty?
-    
-    quotes.sample
+  def self.random_quote
+    quote = all.sample
+    quote || create_default_quote
   end
-
-  private
 
   def self.create_default_quote
-    new(
-      content: "No quotes available at the moment.",
-      author: "SpecFixer System"
+    create!(
+      content: "The only way to do great work is to love what you do.",
+      author: "Steve Jobs",
+      category: "motivation"
     )
+  end
+
+  def formatted_display
+    "\"#{content}\" — #{author}"
   end
 end
