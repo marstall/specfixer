@@ -149,6 +149,14 @@ jobs:
       - name: Create autofix branch
         run: |
           git checkout -b ${{ steps.branch-info.outputs.branch_name }}
+          
+          # Create an initial commit to ensure the branch has content for PR creation
+          echo "# AI Autofix Branch" > .autofix-branch-marker
+          echo "This branch was created for AI autofix attempts." >> .autofix-branch-marker
+          echo "Created at: $(date)" >> .autofix-branch-marker
+          git add .autofix-branch-marker
+          git commit -m "INIT: Create autofix branch for AI analysis"
+          
           git push origin ${{ steps.branch-info.outputs.branch_name }}
 
   # Retry loop controller - manages up to 5 AI fix attempts
