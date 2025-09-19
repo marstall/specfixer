@@ -625,7 +625,7 @@ jobs:
       - name: Install Ruby (lightweight)
         uses: ruby/setup-ruby@v1
         with:
-          ruby-version: .ruby-version
+          ruby-version: '3.3.1'
           bundler-cache: false  # Use cached gems
 
       - name: Retry loop - AI fix and verify up to 5 times
