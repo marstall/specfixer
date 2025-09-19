@@ -151,16 +151,373 @@ jobs:
           git checkout -b ${{ steps.branch-info.outputs.branch_name }}
           git push origin ${{ steps.branch-info.outputs.branch_name }}
 
-  # Streamlined AI fix job - reuses environment and test output
-  ai-autofix:
+  # Retry loop controller - manages up to 5 AI fix attempts
+  retry-controller:
     runs-on: ubuntu-latest
     needs: [env-setup, run-tests, branch-create]
     if: failure() && needs.branch-create.result == 'success'
     outputs:
-      has_changes: ${{ steps.ai-analysis.outputs.has_changes }}
-      modified_files: ${{ steps.ai-analysis.outputs.modified_files }}
-      pr_title: ${{ steps.ai-analysis.outputs.pr_title }}
-      pr_analysis: ${{ steps.ai-analysis.outputs.pr_analysis }}
+      pr_number: ${{ steps.create-initial-pr.outputs.pr_number }}
+      final_status: ${{ steps.retry-loop.outputs.final_status }}
+      total_attempts: ${{ steps.retry-loop.outputs.total_attempts }}
+    steps:
+      - name: Checkout autofix branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.branch-create.outputs.branch_name }}
+          fetch-depth: 0
+          token: ${{ secrets.AUTOFIX_TOKEN }}
+
+      - name: Restore cached environment
+        uses: actions/cache@v3
+        with:
+          path: |
+            vendor/bundle
+            node_modules
+            tmp/cache
+          key: ${{ needs.env-setup.outputs.cache-key }}
+
+      - name: Install Ruby (lightweight)
+        uses: ruby/setup-ruby@78c01b705fd9d5ad960d432d3a0cfa341d50e410
+        with:
+          ruby-version: '3.3.1'
+          bundler-cache: true
+
+      - name: Create initial PR for tracking
+        id: create-initial-pr
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.AUTOFIX_TOKEN }}
+          script: |
+            const title = `DEV: 🤖 AI Autofix - Attempting to resolve test failures`;
+            const body = `## 🤖 AI-Generated Test Fix (In Progress)
+            
+            This PR was automatically created by Claude AI to fix failing specs.
+            
+            ### 🔄 Retry Status
+            - **Current Status:** Starting AI analysis...
+            - **Attempts:** 0/5
+            - **Branch:** \`${{ needs.branch-create.outputs.branch_name }}\`
+            
+            *This PR will be updated with progress as the AI attempts to fix the issues.*`;
+            
+            const { data: pr } = await github.rest.pulls.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: title,
+              head: '${{ needs.branch-create.outputs.branch_name }}',
+              base: 'main',
+              body: body
+            });
+            
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: pr.number,
+              labels: ['🤖 autofix', '🔄 in-progress']
+            });
+            
+            core.setOutput('pr_number', pr.number);
+            return pr.number;
+
+      - name: Execute retry loop
+        id: retry-loop
+        uses: actions/github-script@v7
+        env:
+          RECENT_DIFF: ${{ needs.run-tests.outputs.test-output }}
+          ERROR_OUTPUT: ${{ needs.run-tests.outputs.test-output }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_REGION: us-west-2
+          PR_NUMBER: ${{ steps.create-initial-pr.outputs.pr_number }}
+          BRANCH_NAME: ${{ needs.branch-create.outputs.branch_name }}
+        with:
+          github-token: ${{ secrets.AUTOFIX_TOKEN }}
+          script: |
+            const fs = require('fs');
+            const { execSync } = require('child_process');
+            const crypto = require('crypto');
+            
+            const maxAttempts = 5;
+            let attempt = 1;
+            let finalStatus = 'failed';
+            let lastError = '';
+            
+            // AWS Bedrock helper functions
+            function createSignature(method, url, headers, body, accessKey, secretKey, region, service, timestamp) {
+              const algorithm = 'AWS4-HMAC-SHA256';
+              const date = timestamp.toISOString().slice(0, 10).replace(/-/g, '');
+              const credentialScope = `${date}/${region}/${service}/aws4_request`;
+              
+              const urlObj = new URL(url);
+              const canonicalUri = encodeURI(urlObj.pathname).replace(/:/g, '%3A');
+              const canonicalQueryString = urlObj.search.slice(1);
+              
+              const canonicalHeaders = Object.keys(headers)
+                .sort()
+                .map(key => `${key.toLowerCase()}:${headers[key].trim()}`)
+                .join('\n') + '\n';
+              
+              const signedHeaders = Object.keys(headers)
+                .sort()
+                .map(key => key.toLowerCase())
+                .join(';');
+              
+              const payloadHash = crypto.createHash('sha256').update(body).digest('hex');
+              
+              const canonicalRequest = [
+                method,
+                canonicalUri,
+                canonicalQueryString,
+                canonicalHeaders,
+                signedHeaders,
+                payloadHash
+              ].join('\n');
+              
+              const canonicalRequestHash = crypto.createHash('sha256').update(canonicalRequest).digest('hex');
+              const stringToSign = [
+                algorithm,
+                timestamp.toISOString().replace(/[:-]|\.\d{3}/g, ''),
+                credentialScope,
+                canonicalRequestHash
+              ].join('\n');
+              
+              const kDate = crypto.createHmac('sha256', `AWS4${secretKey}`).update(date).digest();
+              const kRegion = crypto.createHmac('sha256', kDate).update(region).digest();
+              const kService = crypto.createHmac('sha256', kRegion).update(service).digest();
+              const kSigning = crypto.createHmac('sha256', kService).update('aws4_request').digest();
+              
+              const signature = crypto.createHmac('sha256', kSigning).update(stringToSign).digest('hex');
+              
+              return `${algorithm} Credential=${accessKey}/${credentialScope}, SignedHeaders=${signedHeaders}, Signature=${signature}`;
+            }
+            
+            async function callClaudeAI(prompt, attemptNum) {
+              const region = process.env.AWS_REGION;
+              const modelId = 'us.anthropic.claude-sonnet-4-20250514-v1:0';
+              const bedrockUrl = `https://bedrock-runtime.${region}.amazonaws.com/model/${modelId}/invoke`;
+              
+              const timestamp = new Date();
+              const body = JSON.stringify({
+                anthropic_version: 'bedrock-2023-05-31',
+                max_tokens: 2000,
+                temperature: 0.1,
+                system: `You are an expert Rails developer. This is attempt ${attemptNum} of ${maxAttempts} to fix failing tests. ${attemptNum > 1 ? 'Previous attempts failed - try a different approach.' : ''}`,
+                messages: [{ role: 'user', content: prompt }]
+              });
+              
+              const headers = {
+                'Content-Type': 'application/json',
+                'X-Amz-Date': timestamp.toISOString().replace(/[:-]|\.\d{3}/g, ''),
+                'Host': `bedrock-runtime.${region}.amazonaws.com`
+              };
+              
+              const authorization = createSignature(
+                'POST', bedrockUrl, headers, body,
+                process.env.AWS_ACCESS_KEY_ID,
+                process.env.AWS_SECRET_ACCESS_KEY,
+                region, 'bedrock', timestamp
+              );
+              
+              headers['Authorization'] = authorization;
+              
+              const response = await fetch(bedrockUrl, {
+                method: 'POST',
+                headers: headers,
+                body: body
+              });
+              
+              if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(`AWS Bedrock API failed: ${response.status} - ${errorText}`);
+              }
+              
+              return await response.json();
+            }
+            
+            async function runTests() {
+              try {
+                execSync('bin/rails db:create db:migrate', { stdio: 'inherit' });
+                const output = execSync('bin/rake 2>&1', { encoding: 'utf8' });
+                return { success: true, output };
+              } catch (error) {
+                return { success: false, output: error.stdout || error.message };
+              }
+            }
+            
+            // Main retry loop
+            while (attempt <= maxAttempts) {
+              console.log(`\n🔄 Starting attempt ${attempt}/${maxAttempts}`);
+              
+              try {
+                // Comment on PR with current attempt
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: process.env.PR_NUMBER,
+                  body: `## 🔄 Attempt ${attempt}/${maxAttempts}\n\n**Status:** Analyzing test failures and generating fixes...\n\n*Started at: ${new Date().toISOString()}*`
+                });
+                
+                // Load prompt template
+                const promptTemplate = fs.readFileSync('.github/claude-prompt.md', 'utf8');
+                const errorOutput = attempt === 1 ? process.env.ERROR_OUTPUT : lastError;
+                const prompt = promptTemplate
+                  .replace('{recentDiff}', process.env.RECENT_DIFF || 'No recent changes')
+                  .replace('{errorOutput}', errorOutput);
+                
+                // Call Claude AI
+                console.log('🤖 Calling Claude AI...');
+                const response = await callClaudeAI(prompt, attempt);
+                
+                if (!response?.content?.[0]?.text) {
+                  throw new Error('No content in Claude response');
+                }
+                
+                const analysis = response.content[0].text.trim();
+                console.log('📝 Claude analysis received');
+                
+                // Apply fixes
+                let hasChanges = false;
+                const modifiedFiles = [];
+                const sections = analysis.split('FILE:');
+                
+                for (const section of sections) {
+                  if (!section.trim()) continue;
+                  
+                  const lines = section.trim().split('\n');
+                  const filePath = lines[0].trim();
+                  
+                  if (!fs.existsSync(filePath)) continue;
+                  
+                  const contentIndex = lines.findIndex(line => line.startsWith('CONTENT:'));
+                  if (contentIndex === -1) continue;
+                  
+                  let contentEndIndex = lines.length;
+                  for (let i = contentIndex + 1; i < lines.length; i++) {
+                    if (lines[i].startsWith('COMMIT_MESSAGE:')) {
+                      contentEndIndex = i;
+                      break;
+                    }
+                  }
+                  
+                  const newContent = lines.slice(contentIndex + 1, contentEndIndex).join('\n').trim();
+                  
+                  if (newContent && newContent.length > 10) {
+                    const originalContent = fs.readFileSync(filePath, 'utf8');
+                    if (originalContent.trim() !== newContent.trim()) {
+                      fs.writeFileSync(filePath, newContent, 'utf8');
+                      hasChanges = true;
+                      modifiedFiles.push(filePath);
+                      console.log(`✅ Applied fix to ${filePath}`);
+                    }
+                  }
+                }
+                
+                if (hasChanges) {
+                  // Commit changes
+                  execSync('git config user.name "github-actions[bot]"');
+                  execSync('git config user.email "github-actions[bot]@users.noreply.github.com"');
+                  
+                  modifiedFiles.forEach(file => {
+                    execSync(`git add "${file}"`);
+                  });
+                  
+                  const commitMessage = `FIX: 🤖 Attempt ${attempt}/${maxAttempts} - AI autofix`;
+                  execSync(`git commit -m "${commitMessage}"`);
+                  execSync(`git push origin ${process.env.BRANCH_NAME}`);
+                  
+                  console.log('✅ Changes committed and pushed');
+                }
+                
+                // Test the fix
+                console.log('🧪 Running tests to verify fix...');
+                const testResult = await runTests();
+                
+                // Comment with results
+                const analysisPreview = analysis.substring(0, 500) + (analysis.length > 500 ? '...' : '');
+                const statusIcon = testResult.success ? '✅' : '❌';
+                const statusText = testResult.success ? 'PASSED' : 'FAILED';
+                
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: process.env.PR_NUMBER,
+                  body: `## ${statusIcon} Attempt ${attempt}/${maxAttempts} Results\n\n**Status:** ${statusText}\n\n### 🧠 Claude's Thinking\n\`\`\`\n${analysisPreview}\n\`\`\`\n\n### 📁 Files Modified\n${modifiedFiles.length > 0 ? modifiedFiles.map(f => `- ${f}`).join('\n') : 'No files modified'}\n\n### 🧪 Test Results\n\`\`\`\n${testResult.output.substring(0, 1000)}${testResult.output.length > 1000 ? '\n... (truncated)' : ''}\n\`\`\`\n\n---\n*Completed at: ${new Date().toISOString()}*`
+                });
+                
+                if (testResult.success) {
+                  finalStatus = 'success';
+                  console.log('🎉 Tests passed! Fix successful.');
+                  break;
+                } else {
+                  lastError = testResult.output;
+                  console.log(`❌ Tests still failing. Attempt ${attempt} failed.`);
+                }
+                
+              } catch (error) {
+                console.error(`❌ Attempt ${attempt} failed:`, error.message);
+                lastError = error.message;
+                
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: process.env.PR_NUMBER,
+                  body: `## ❌ Attempt ${attempt}/${maxAttempts} Failed\n\n**Error:** ${error.message}\n\n*Failed at: ${new Date().toISOString()}*`
+                });
+              }
+              
+              attempt++;
+            }
+            
+            // Final status update
+            const finalIcon = finalStatus === 'success' ? '✅' : '❌';
+            const finalMessage = finalStatus === 'success' 
+              ? `🎉 **SUCCESS!** Tests are now passing after ${attempt - 1} attempts.`
+              : `❌ **FAILED** after ${maxAttempts} attempts. Manual intervention may be required.`;
+            
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: process.env.PR_NUMBER,
+              body: `## 🏁 Final Results\n\n${finalMessage}\n\n**Total Attempts:** ${attempt - 1}/${maxAttempts}\n**Final Status:** ${finalIcon} ${finalStatus.toUpperCase()}\n\n---\n*Autofix process completed at: ${new Date().toISOString()}*`
+            });
+            
+            // Update PR labels
+            const labelsToAdd = finalStatus === 'success' ? ['✅ fix-verified'] : ['❌ fix-needs-work'];
+            const labelsToRemove = ['🔄 in-progress'];
+            
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: process.env.PR_NUMBER,
+              labels: labelsToAdd
+            });
+            
+            // Remove in-progress label
+            try {
+              await github.rest.issues.removeLabel({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: process.env.PR_NUMBER,
+                name: '🔄 in-progress'
+              });
+            } catch (e) {
+              // Label might not exist, ignore error
+            }
+            
+            core.setOutput('final_status', finalStatus);
+            core.setOutput('total_attempts', attempt - 1);
+
+  # Legacy AI autofix job - now simplified since retry-controller handles the logic
+  ai-autofix:
+    runs-on: ubuntu-latest
+    needs: [retry-controller]
+    if: always() && needs.retry-controller.result == 'success'
+    outputs:
+      has_changes: 'true'
+      modified_files: 'Handled by retry-controller'
+      pr_title: 'AI Autofix with Retry Logic'
+      pr_analysis: 'AI attempted fixes with retry logic. See PR comments for details.'
     steps:
       - name: Checkout autofix branch
         uses: actions/checkout@v4
@@ -524,178 +881,36 @@ jobs:
           
           echo "✅ Successfully committed and pushed AI fixes"
 
-  # Commit and PR creation (unchanged but now more efficient due to upstream optimizations)
+  # Legacy create-pr job - now skipped since retry-controller creates the PR
   create-pr:
     runs-on: ubuntu-latest
-    needs: [env-setup, run-tests, branch-create, ai-autofix]  # Add setup for consistent layout
-    if: failure() && needs.ai-autofix.result == 'success' && needs.ai-autofix.outputs.has_changes == 'true'
+    needs: [retry-controller]
+    if: always() && needs.retry-controller.result == 'success'
+    outputs:
+      pr_number: ${{ needs.retry-controller.outputs.pr_number }}
     steps:
-      - name: Checkout autofix branch
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.branch-create.outputs.branch_name }}
-          fetch-depth: 0
-          token: ${{ secrets.AUTOFIX_TOKEN }}
+      - name: PR already created by retry-controller
+        run: |
+          echo "PR was created by retry-controller job"
+          echo "PR Number: ${{ needs.retry-controller.outputs.pr_number }}"
+          echo "Final Status: ${{ needs.retry-controller.outputs.final_status }}"
+          echo "Total Attempts: ${{ needs.retry-controller.outputs.total_attempts }}"
 
-      - name: Create PR with AI fix details
-        uses: actions/github-script@v7
-        env:
-          PR_TITLE: ${{ needs.ai-autofix.outputs.pr_title }}
-          PR_ANALYSIS: ${{ needs.ai-autofix.outputs.pr_analysis }}
-          MODIFIED_FILES: ${{ needs.ai-autofix.outputs.modified_files }}
-          BRANCH_NAME: ${{ needs.branch-create.outputs.branch_name }}
-        with:
-          github-token: ${{ secrets.AUTOFIX_TOKEN }}
-          script: |
-            const prTitle = process.env.PR_TITLE || 'Resolve test failures';
-            const prAnalysis = process.env.PR_ANALYSIS || 'Claude AI attempted to fix failing tests.';
-            const modifiedFiles = process.env.MODIFIED_FILES || 'No files modified';
-            const branchName = process.env.BRANCH_NAME || 'autofix-branch';
-            
-            const title = `DEV: 🤖 ${prTitle}`;
-            
-            const timestamp = new Date().toISOString();
-            const body = `## 🤖 AI-Generated Test Fix
-            
-            This PR was automatically created by Claude AI to fix failing specs in this Discourse plugin.
-            
-            ### 🧠 Claude's Analysis
-            
-            ${prAnalysis}
-            
-            ### 📋 Changes Made
-            - **Files Modified:** ${modifiedFiles}
-            - **Branch:** \`${branchName}\`
-            - **Generated:** ${timestamp}
-            ### 🧪 Next Steps
-            1. Review Claude's analysis and reasoning above
-            2. Examine the proposed code changes
-            3. Run tests locally to verify the fix works
-            4. Refine the solution if needed
-            5. Merge when satisfied with the fix
-            
-            *Generated by Claude AI via GitHub Actions*`;
-            
-            const { data: pr } = await github.rest.pulls.create({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              title: title,
-              head: '${{ needs.branch-create.outputs.branch_name }}',
-              base: 'main',
-              body: body
-            });
-            
-            console.log(`Created optimized AI autofix PR: ${pr.html_url}`);
-            
-            await github.rest.issues.addLabels({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: pr.number,
-              labels: ['🤖 autofix']
-            });
-            
-            // Store PR number for verification step
-            core.setOutput('pr_number', pr.number);
-
-  # Verify the fix by running the originally failing specs
+  # Legacy verify-fix job - now handled within retry-controller
   verify-fix:
     runs-on: ubuntu-latest
-    needs: [env-setup, run-tests, branch-create, ai-autofix, create-pr]
-    if: failure() && needs.create-pr.result == 'success'
+    needs: [retry-controller, create-pr]
+    if: always() && needs.retry-controller.result == 'success'
     steps:
-      - name: Checkout autofix branch
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.branch-create.outputs.branch_name }}
-          fetch-depth: 0
-          token: ${{ secrets.AUTOFIX_TOKEN }}
-
-      - name: Restore cached environment
-        uses: actions/cache/restore@v4
-        with:
-          path: |
-            vendor/bundle
-            node_modules
-            tmp/cache
-          key: ${{ needs.env-setup.outputs.cache-key }}
-          restore-keys: |
-            rails-${{ runner.os }}-${{ hashFiles('**/Gemfile.lock') }}-
-            rails-${{ runner.os }}-
-
-      - name: Install Ruby (lightweight)
-        uses: ruby/setup-ruby@v1
-        with:
-          ruby-version: .ruby-version
-          bundler-cache: false  # Use cached gems
-
-      - name: Run originally failing specs
-        id: verify-specs
+      - name: Verification handled by retry-controller
         run: |
-          echo "🧪 Running originally failing specs to verify Claude's fix..."
-
-          # Run the same specs that originally failed
-          if bundle exec rspec --format documentation --color 2>&1 | tee spec_output.txt; then
-            echo "✅ All specs are now passing!"
-            echo "status=success" >> $GITHUB_OUTPUT
-          else
-            echo "❌ Some specs are still failing"
-            echo "status=failure" >> $GITHUB_OUTPUT
-          fi
+          echo "Verification was handled by the retry-controller job"
+          echo "Final Status: ${{ needs.retry-controller.outputs.final_status }}"
+          echo "Total Attempts: ${{ needs.retry-controller.outputs.total_attempts }}"
           
-          # Capture the output for PR comment
-          echo "SPEC_OUTPUT<<EOF" >> $GITHUB_OUTPUT
-          cat spec_output.txt >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
-
-      - name: Comment on PR with verification results
-        uses: actions/github-script@v7
-        with:
-          github-token: ${{ secrets.AUTOFIX_TOKEN }}
-          script: |
-            const status = '${{ steps.verify-specs.outputs.status }}';
-            const specOutput = `${{ steps.verify-specs.outputs.SPEC_OUTPUT }}`;
-            
-            const statusIcon = status === 'success' ? '✅' : '❌';
-            const statusText = status === 'success' ? 'PASSED' : 'FAILED';
-            const statusColor = status === 'success' ? '🟢' : '🔴';
-            
-            const body = `## ${statusIcon} Fix Verification Results
-            
-            **Status**: ${statusColor} **${statusText}**
-            
-            Claude's proposed fix has been automatically tested by running the originally failing specs.
-            
-            ### 🧪 Spec Results
-            \`\`\`
-            ${specOutput}
-            \`\`\`
-            
-            ${status === 'success' 
-              ? '🎉 **Great news!** All specs are now passing. Claude\'s fix appears to be working correctly.' 
-              : '⚠️ **Needs attention:** Some specs are still failing. The fix may need refinement or there could be additional issues.'}
-            
-            *Verification completed automatically after PR creation*`;
-            
-            await github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: ${{ needs.create-pr.outputs.pr_number }},
-              body: body
-            });
-            
-            // Update PR labels based on verification results
-            if (status === 'success') {
-              await github.rest.issues.addLabels({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: ${{ needs.create-pr.outputs.pr_number }},
-                labels: ['✅ fix-verified']
-              });
-            } else {
-              await github.rest.issues.addLabels({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: ${{ needs.create-pr.outputs.pr_number }},
-                labels: ['❌ fix-needs-work']
-              });
-            }
+          if [ "${{ needs.retry-controller.outputs.final_status }}" = "success" ]; then
+            echo "✅ All tests are now passing!"
+          else
+            echo "❌ Tests are still failing after all retry attempts"
+            exit 1
+          fi
