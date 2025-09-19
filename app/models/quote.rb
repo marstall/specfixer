@@ -1,12 +1,9 @@
-class Quote < ApplicationRecord
+class Quote < ActiveRecord::Base
   validates :content, presence: true
   validates :author, presence: true
-  validates :category, presence: true
-
-  scope :by_category, ->(category) { where(category: category) }
 
   def self.daily_quote
-    # Get a consistent quote for the day based on the current date
+    # Return a consistent quote for the day based on date
     # This ensures the same quote is shown throughout the day
     date_seed = Date.current.strftime("%Y%m%d").to_i
     quotes = all.to_a
@@ -15,23 +12,20 @@ class Quote < ApplicationRecord
     quotes[date_seed % quotes.length]
   end
 
-  def self.random_quote
-    # Get a truly random quote for the refresh functionality
+  def self.random
+    # Return a random quote
     quotes = all.to_a
     return create_default_quote if quotes.empty?
     
     quotes.sample
   end
 
-  def self.create_default_quote
-    create!(
-      content: "The only way to do great work is to love what you do.",
-      author: "Steve Jobs",
-      category: "motivation"
-    )
-  end
+  private
 
-  def formatted_display
-    "\"#{content}\" - #{author}"
+  def self.create_default_quote
+    new(
+      content: "No quotes available at the moment.",
+      author: "SpecFixer System"
+    )
   end
 end
