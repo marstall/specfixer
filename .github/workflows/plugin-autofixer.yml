@@ -1,9 +1,18 @@
-# Optimized Ruby on Rails CI workflow
-# Key optimizations:
-# 1. Shared setup job to avoid duplicate Ruby/Rails environment setup
-# 2. Cache test results and artifacts between jobs
-# 3. Conditional job execution to skip unnecessary work
-# 4. Streamlined AI analysis with better error handling
+
+# AI-Powered Autofix Workflow for Rails Specs
+#
+# This workflow automatically fixes failing specs using Claude AI and creates a PR with the fixes.
+#
+# WORKFLOW STEPS:
+# 1. 🏗️  env-setup      - Sets up Ruby/Rails environment and caches dependencies
+# 2. 🧪  run-tests      - Runs all specs to identify failures
+# 3. 🌿  branch-create  - Creates a new autofix branch for the fixes
+# 4. 🤖  ai-autofix     - Calls Claude AI to analyze failures and generate fixes
+# 5. 📝  create-pr      - Creates a PR with Claude's fixes and analysis
+# 6. ✅  verify-fix     - Runs the originally failing specs to verify the fix works
+#
+# TRIGGER: Manual dispatch via GitHub Actions UI
+# OUTPUT: PR with AI-generated fixes, automatically verified
 
 name: "Autofix (use Claude to create PR with fixes for failing specs)"
 on:
